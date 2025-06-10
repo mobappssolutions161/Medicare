@@ -1,0 +1,100 @@
+event loop
+for in for of
+object method
+closure 
+call, apply method
+hosting
+recursion
+what use for Authentication
+memorization 
+temporal dead zone
+clean function js
+higher-order function (HOF)-why use
+debouncing 
+cookies in javascript
+local store
+react state
+react lifecycle methods
+redux principal
+redux toolkit
+use callback
+if const value is 10 
+change the value
+lazylode
+CONTEXT aPI
+microservice architecture how to manage
+
+
+what is deffrensh between htl, and htm5
+2.ifram matlipal attribute
+3.different tag
+4. Difference between div and span
+5.attribute
+6.semantic 
+
+css
+6.z-index
+7.flex box
+8.boxmodel
+9. media Query
+10. max-width
+min-with
+11.view height
+12.posision relative ,absulut
+sticy,fixed
+if one div posion relative and outhe is fixid and top0 what is position of second div
+13.how to define css in html
+14.dispaly block only apply z-index
+
+js
+1.what is js
+2.different type of variable
+3.promiss
+Dom
+getelementid,getelementAll
+4.virchal dome
+5.rest opreter spread opreater
+6.state
+7.prose mutable
+8.data pass to chield to parenst
+9.CSS Pseudo-elements
+10.props are mutable and state are immutable
+11. control component uncntole componet
+12.style is add in footer?
+
+
+3.1.what is diffrens between forEach and map
+2.what is diffrens Arrow function and normal funcation
+3.callback kon issue 
+4.usecontext which issue soleve
+5.hosting 
+6.function behave with hosting
+7.who to understand react code by broser  who udersatnd code
+8.what is javacript
+9.what is react
+10.promise race
+11.whot o handal promise error
+12.who to right promise code
+13.jsx
+14.redux toolkit who to use in react
+15.redux basic principal
+16.
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+

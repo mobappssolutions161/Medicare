@@ -6,6 +6,7 @@ import upload from "../../upload.js"
 
 router.get("/getAllUsers", adminController.getAllUsers)
 router.get("/getActiveDoctors", adminController.getActiveDoctors)
+router.get("/getAllDoctors", adminController.getAllDoctors)
 router.post("/changeUserStatus/:userId", adminController.changeUserStatus)
 router.post("/softDeleteUser/:userId", adminController.softDeleteUser)
 router.post("/registerPatient",upload.fields([
@@ -23,7 +24,16 @@ router.put("/updatePatient/:patientId", upload.fields([
 ,adminController.updatePatient)
 router.delete("/deletePatient/:patientId", adminController.deletePatient)
 router.post("/createAppointment", adminController.createAppointment)
+router.get("/getAllAppointments", adminController.getAllAppointments)
 router.post("/doctorAvailability", adminController.doctorAvailability)
 router.post("/appointmentByDoctorId/:doctorId", adminController.appointmentByDoctorId)
+router.post("/appointmentByPatientId/:patientId", adminController.appointmentByPatientId)
 
-export default router 
+router.get("/waitingAppointmentList", adminController.waitingAppointmentList)
+router.post("/bookingAppointment/:appointmentId", adminController.bookingAppointment)
+router.post("/changeAppointmentStatus/:appointmentId", adminController.changeAppointmentStatus)
+
+router.post("/recordPatientVitals", adminController.recordPatientVitals)
+router.get("/getPatientVitalsByPatientId/:patientId", adminController.getPatientVitalsByPatientId)
+router.put("/updatePatientVitals/:vitalId", adminController.updatePatientVitals)
+export default router ;
