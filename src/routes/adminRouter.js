@@ -39,10 +39,12 @@ router.get("/getConfirmedAppointments", adminController.getConfirmedAppointments
 router.delete("/deleteAppointments/:id", adminController.deleteAppointments)
 router.post("/doctorAvailability", adminController.doctorAvailability)
 router.post("/appointmentByDoctorId/:doctorId", adminController.appointmentByDoctorId)
+router.post("/getAppointmentsByDate", adminController.getAppointmentsByDate)
 router.post("/appointmentByPatientId/:patientId", adminController.appointmentByPatientId)
 
 router.post("/bookingAppointment/:appointmentId", adminController.bookingAppointment)
 router.post("/changeAppointmentStatus/:appointmentId", adminController.changeAppointmentStatus)
+router.put("/cancelAppointmentStatus/:appointmentId", adminController.cancelAppointmentStatus)
 
 router.post("/recordPatientVitals", adminController.recordPatientVitals)
 router.get("/getPatientVitalsByPatientId/:patientId", adminController.getPatientVitalsByPatientId)

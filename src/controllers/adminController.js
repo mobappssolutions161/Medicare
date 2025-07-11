@@ -381,6 +381,154 @@ const deleteDoctor = async (req, res) => {
   }
 };
 
+// const registerPatient = async (req, res) => {
+//   try {
+//     const {
+//       firstName,
+//       middleName,
+//       lastName,
+//       dateOfBirth,
+//       gender,
+//       nationality,
+//       civilIdNumber,
+//       passportNumber,
+//       mobileNumber,
+//       email,
+//       address,
+//       fileOpenedDate,
+//       firstVisitDate,
+//       defaultDoctorId,
+//       emContactName,
+//       emContactRelation,
+//       emContactPhone1,
+//       emContactPhone2,
+//     } = req.body;
+
+//     if (
+//       !firstName ||
+//       !lastName ||
+//       !dateOfBirth ||
+//       !gender ||
+//       !civilIdNumber ||
+//       !email ||
+//       !mobileNumber
+//     ) {
+//       return res.status(400).json({
+//         success: false,
+//         message:
+//           "Missing required fields: firstName, lastName, dateOfBirth, gender, civilIdNumber, email, mobileNumber are required.",
+//       });
+//     }
+
+//     //  Step 1: Generate next fileNumber from last existing one
+
+//     const lastFileNumberQuery = `SELECT fileNumber FROM patients ORDER BY id DESC LIMIT 1`;
+
+//     pool.query(lastFileNumberQuery, (err, lastResult) => {
+//       if (err) {
+//         return res.status(500).json({
+//           success: false,
+//           message: "Error fetching last file number",
+//           error: err.message,
+//         });
+//       }
+
+//       const lastFileNumber = lastResult[0]?.fileNumber || null;
+//       const fileNumber = generateNextFileNumber(lastFileNumber);
+
+//       //  Step 2: Check for duplicates
+//       const checkDuplicateQuery = `
+//         SELECT id FROM patients WHERE civilIdNumber = ? OR passportNumber = ?
+//       `;
+
+//       pool.query(
+//         checkDuplicateQuery,
+//         [civilIdNumber, passportNumber],
+//         (dupErr, dupResults) => {
+//           if (dupErr) {
+//             return res.status(500).json({
+//               success: false,
+//               message: "Database error checking duplicates",
+//               error: dupErr.message,
+//             });
+//           }
+
+//           if (dupResults.length > 0) {
+//             return res.status(409).json({
+//               success: false,
+//               message:
+//                 "Patient with this Civil ID or Passport Number already exists",
+//             });
+//           }
+
+//           //  Step 3: Prepare uploaded file data
+//           const profileImage = req.files?.profileImage?.[0]?.filename || null;
+//           const cprScan = req.files?.cprScan?.[0]?.filename || null;
+//           const passportCopy = req.files?.passportCopy?.[0]?.filename || null;
+
+//           //  Step 4: Insert new patient
+//           const insertQuery = `
+//           INSERT INTO patients (
+//             fileNumber, firstName, middleName, lastName, profileImage, dateOfBirth, gender,
+//             nationality, civilIdNumber, passportNumber, mobileNumber, email, address,
+//             CPR_scan_doc, passport_copy, fileOpenedDate, firstVisitDate, defaultDoctorId,
+//             emContactName, emContactRelation, emContactPhone1, emContactPhone2
+//           ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+//         `;
+
+//           const values = [
+//             fileNumber,
+//             firstName,
+//             middleName || null,
+//             lastName,
+//             profileImage,
+//             dateOfBirth,
+//             gender,
+//             nationality || null,
+//             civilIdNumber,
+//             passportNumber || null,
+//             mobileNumber || null,
+//             email || null,
+//             address || null,
+//             cprScan,
+//             passportCopy,
+//             fileOpenedDate || null,
+//             firstVisitDate || null,
+//             defaultDoctorId || null,
+//             emContactName || null,
+//             emContactRelation || null,
+//             emContactPhone1 || null,
+//             emContactPhone2 || null,
+//           ];
+
+//           pool.query(insertQuery, values, (insertErr, result) => {
+//             if (insertErr) {
+//               return res.status(500).json({
+//                 success: false,
+//                 message: "Error registering patient",
+//                 error: insertErr.message,
+//               });
+//             }
+
+//             return res.status(201).json({
+//               success: true,
+//               message: "Patient registered successfully",
+//               patientId: result.insertId,
+//               fileNumber,
+//             });
+//           });
+//         }
+//       );
+//     });
+//   } catch (error) {
+//     return res.status(500).json({
+//       success: false,
+//       message: "Server error",
+//       error: error.message,
+//     });
+//   }
+// };
+
 const registerPatient = async (req, res) => {
   try {
     const {
@@ -420,7 +568,22 @@ const registerPatient = async (req, res) => {
       });
     }
 
-    //  Step 1: Generate next fileNumber from last existing one
+    // ✅ Calculate age from DOB
+    const calculateAge = (dob) => {
+      const birthDate = new Date(dob);
+      const today = new Date();
+      let age = today.getFullYear() - birthDate.getFullYear();
+      const monthDiff = today.getMonth() - birthDate.getMonth();
+      if (
+        monthDiff < 0 ||
+        (monthDiff === 0 && today.getDate() < birthDate.getDate())
+      ) {
+        age--;
+      }
+      return age;
+    };
+
+    const age = calculateAge(dateOfBirth);
 
     const lastFileNumberQuery = `SELECT fileNumber FROM patients ORDER BY id DESC LIMIT 1`;
 
@@ -436,7 +599,6 @@ const registerPatient = async (req, res) => {
       const lastFileNumber = lastResult[0]?.fileNumber || null;
       const fileNumber = generateNextFileNumber(lastFileNumber);
 
-      //  Step 2: Check for duplicates
       const checkDuplicateQuery = `
         SELECT id FROM patients WHERE civilIdNumber = ? OR passportNumber = ?
       `;
@@ -461,19 +623,18 @@ const registerPatient = async (req, res) => {
             });
           }
 
-          //  Step 3: Prepare uploaded file data
           const profileImage = req.files?.profileImage?.[0]?.filename || null;
           const cprScan = req.files?.cprScan?.[0]?.filename || null;
           const passportCopy = req.files?.passportCopy?.[0]?.filename || null;
 
-          //  Step 4: Insert new patient
+          // ✅ Include `age` in insert query
           const insertQuery = `
           INSERT INTO patients (
-            fileNumber, firstName, middleName, lastName, profileImage, dateOfBirth, gender,
+            fileNumber, firstName, middleName, lastName, profileImage, dateOfBirth, age, gender,
             nationality, civilIdNumber, passportNumber, mobileNumber, email, address,
             CPR_scan_doc, passport_copy, fileOpenedDate, firstVisitDate, defaultDoctorId,
             emContactName, emContactRelation, emContactPhone1, emContactPhone2
-          ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+          ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
         `;
 
           const values = [
@@ -483,6 +644,7 @@ const registerPatient = async (req, res) => {
             lastName,
             profileImage,
             dateOfBirth,
+            age,
             gender,
             nationality || null,
             civilIdNumber,
@@ -513,8 +675,6 @@ const registerPatient = async (req, res) => {
             return res.status(201).json({
               success: true,
               message: "Patient registered successfully",
-              patientId: result.insertId,
-              fileNumber,
             });
           });
         }
@@ -528,6 +688,7 @@ const registerPatient = async (req, res) => {
     });
   }
 };
+
 
 /* const getAllPatients = async (req,res)=>{
   try {
@@ -1065,7 +1226,17 @@ const getConfirmedAppointments = async (req, res) => {
   try {
     const fetchAppointments = () => {
       return new Promise((resolve, reject) => {
-        const query = "SELECT * FROM appointments WHERE status = 'Confirmed'";
+        const query = `
+          SELECT 
+            a.*, 
+            p.firstName, p.middleName, p.lastName, p.gender, p.dateOfBirth, p.age,
+            p.mobileNumber, p.email, p.nationality, p.address,
+            p.profileImage, p.civilIdNumber, p.passportNumber
+          FROM appointments a
+          JOIN patients p ON a.patientId = p.id
+          WHERE a.status = 'Confirmed' or a.status = 'Cancelled'
+        `;
+
         pool.query(query, (err, results) => {
           if (err) return reject(err);
           resolve(results);
@@ -1078,15 +1249,35 @@ const getConfirmedAppointments = async (req, res) => {
     if (!appointments || appointments.length === 0) {
       return res.status(404).json({
         success: false,
-        message: "No appointments with status 'Waiting' found",
+        message: "No appointments with status 'Confirmed' found",
         data: [],
       });
     }
 
+    // ✅ Add `duration` field in each appointment
+    const enhancedAppointments = appointments.map((appt) => {
+      let durationInMinutes = null;
+
+      if (appt.startTime && appt.endTime) {
+        const start = new Date(`1970-01-01T${appt.startTime}`);
+        const end = new Date(`1970-01-01T${appt.endTime}`);
+
+        if (!isNaN(start) && !isNaN(end)) {
+          const diffMs = end - start;
+          durationInMinutes = Math.floor(diffMs / 60000); // Convert milliseconds to minutes
+        }
+      }
+
+      return {
+        ...appt,
+        duration: durationInMinutes !== null ? `${durationInMinutes} min` : null,
+      };
+    });
+
     return res.status(200).json({
       success: true,
-      message: "Appointments with status 'Waiting' fetched successfully",
-      data: appointments,
+      message: "Confirmed appointments with patient data fetched successfully",
+      data: enhancedAppointments,
     });
   } catch (error) {
     console.error("Error fetching appointments:", error);
@@ -1329,6 +1520,83 @@ const doctorAvailability = async (req, res) => {
   }
 };
 
+const getAppointmentsByDate = async (req, res) => {
+  try {
+    const { date } = req.query;
+    console.log(date);
+    
+    if (!date) {
+      return res.status(400).json({
+        success: false,
+        message: "Date is required in query (format: YYYY-MM-DD)",
+      });
+    }
+
+    const fetchAppointmentsByDate = () => {
+      return new Promise((resolve, reject) => {
+        const query = `
+  SELECT 
+    a.*, 
+    p.firstName, p.middleName, p.lastName, p.gender, p.dateOfBirth, p.age,
+    p.mobileNumber, p.email, p.nationality, p.address,
+    p.profileImage, p.civilIdNumber, p.passportNumber
+  FROM appointments a
+  JOIN patients p ON a.patientId = p.id
+  WHERE DATE(a.appointmentDate) = ?
+`;
+
+        pool.query(query, [date], (err, results) => {
+          if (err) return reject(err);
+          resolve(results);
+        });
+      });
+    };
+
+    const appointments = await fetchAppointmentsByDate();
+
+    console.log(appointments);
+    
+
+    if (!appointments || appointments.length === 0) {
+      return res.status(404).json({
+        success: false,
+        message: `No appointments found for date ${date}`,
+        data: [],
+      });
+    }
+
+    // Add duration between start and end time
+    const enhancedAppointments = appointments.map((appt) => {
+      let durationInMinutes = null;
+      if (appt.startTime && appt.endTime) {
+        const start = new Date(`1970-01-01T${appt.startTime}`);
+        const end = new Date(`1970-01-01T${appt.endTime}`);
+        if (!isNaN(start) && !isNaN(end)) {
+          const diffMs = end - start;
+          durationInMinutes = Math.floor(diffMs / 60000);
+        }
+      }
+      return {
+        ...appt,
+        duration: durationInMinutes !== null ? `${durationInMinutes} min` : null,
+      };
+    });
+
+    return res.status(200).json({
+      success: true,
+      message: `Appointments for ${date} fetched successfully`,
+      data: enhancedAppointments,
+    });
+  } catch (error) {
+    console.error("Error fetching appointments by date:", error);
+    return res.status(500).json({
+      success: false,
+      message: "An error occurred while retrieving appointments",
+      error: error.message,
+    });
+  }
+};
+
 const appointmentByDoctorId = async (req, res) => {
   try {
     const { doctorId } = req.params;
@@ -1422,7 +1690,6 @@ const appointmentByPatientId = async (req, res) => {
     });
   }
 };
-
 
 const bookingAppointment = async (req, res) => {
   try {
@@ -1574,6 +1841,63 @@ const changeAppointmentStatus = async (req, res) => {
     });
   }
 };
+
+const cancelAppointmentStatus = async (req, res) => {
+  try {
+    const { appointmentId } = req.params;
+    console.log(appointmentId);
+    
+    if (!appointmentId) {
+      return res.status(400).json({
+        success: false,
+        message: "Appointment ID is required",
+      });
+    }
+
+    const checkQuery = `SELECT * FROM appointments WHERE id = ? AND status = 'Confirmed'`;
+
+    pool.query(checkQuery, [appointmentId], (err, result) => {
+      if (err) {
+        return res.status(500).json({
+          success: false,
+          message: "Database error during appointment lookup",
+          error: err.message,
+        });
+      }
+
+      if (result.length === 0) {
+        return res.status(404).json({
+          success: false,
+          message: "No confirmed appointment found with the given ID",
+        });
+      }
+
+      const updateQuery = `UPDATE appointments SET status = 'Cancelled' WHERE id = ?`;
+
+      pool.query(updateQuery, [appointmentId], (updateErr, updateResult) => {
+        if (updateErr) {
+          return res.status(500).json({
+            success: false,
+            message: "Error updating appointment status",
+            error: updateErr.message,
+          });
+        }
+
+        return res.status(200).json({
+          success: true,
+          message: "Appointment status updated to 'Cancelled' successfully",
+        });
+      });
+    });
+  } catch (error) {
+    return res.status(500).json({
+      success: false,
+      message: "Internal Server Error",
+      error: error.message,
+    });
+  }
+};
+
 
 const recordPatientVitals = async (req, res) => {
   try {
@@ -2374,9 +2698,11 @@ export default {
   getAllNationalities,
   doctorAvailability,
   appointmentByDoctorId,
+  getAppointmentsByDate,
   appointmentByPatientId,
   bookingAppointment,
   changeAppointmentStatus,
+  cancelAppointmentStatus,
   recordPatientVitals,
   getPatientVitalsByPatientId,
   updatePatientVitals,
