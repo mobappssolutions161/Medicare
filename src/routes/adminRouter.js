@@ -34,6 +34,7 @@ router.get("/GetPatientServices/:id", adminController.GetPatientServices)
 
 router.post("/createAppointment", adminController.createAppointment)
 router.get("/getAllAppointments", adminController.getAllAppointments)
+router.put("/editAppointment/:appointmentId", adminController.editAppointment )
 router.get("/getWaitingAppointments", adminController.getWaitingAppointments)
 router.get("/getConfirmedAppointments", adminController.getConfirmedAppointments)
 router.delete("/deleteAppointments/:id", adminController.deleteAppointments)
@@ -52,6 +53,8 @@ router.put("/updatePatientVitals/:vitalId", adminController.updatePatientVitals)
 
 router.post("/recordPatientDiagnosis", adminController.recordPatientDiagnosis)
 router.get("/getDiagnosisByPatientId/:patientId", adminController.getDiagnosisByPatientId)
+
+router.get("/getAllRxList",adminController.getAllRxList)
 
 router.post("/addDrug", upload.single("image"), adminController.addDrug)
 router.get("/getDrugs", adminController.getDrugs)
