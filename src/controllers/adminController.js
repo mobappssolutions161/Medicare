@@ -2200,6 +2200,7 @@ const recordPatientVitals = async (req, res) => {
   try {
     const {
       patient_id,
+      doctor_id,
       recorded_at,
       blood_pressure_systolic,
       blood_pressure_diastolic,
@@ -2208,6 +2209,7 @@ const recordPatientVitals = async (req, res) => {
       spo2,
       rbs_mg,
       rbs_nmol,
+      bp_position,
       temperature,
       weight,
       height,
@@ -2215,78 +2217,105 @@ const recordPatientVitals = async (req, res) => {
       urgency,
       notes
     } = req.body;
+console.log(req.body);
 
     // Step 1: Validate required fields
     if (!patient_id || !recorded_at || blood_pressure_systolic == null || blood_pressure_diastolic == null || weight == null || height == null) {
       return res.status(400).json({
         success: false,
-        message: "Missing required fields: patient_id, recorded_at, blood_pressure, weight, and height are required.",
+        message: "Missing required fields: patient_id, recorded_at, blood pressure, weight, and height are required.",
       });
     }
 
-    // Step 2: Check if patient exists
-    const checkPatientQuery = `SELECT id FROM patients WHERE id = ?`;
-    pool.query(checkPatientQuery, [patient_id], (patientErr, patientResult) => {
-      if (patientErr) {
+    // Step 2: Fetch patient details
+    const patientQuery = `SELECT firstName, middleName, lastName, age, gender FROM patients WHERE id = ?`;
+    pool.query(patientQuery, [patient_id], (err, patientResult) => {
+      if (err) {
         return res.status(500).json({
           success: false,
           message: "Error checking patient",
-          error: patientErr.message,
+          error: err.message,
         });
       }
 
-      if (patientResult.length === 0) {
+      if (!patientResult.length) {
         return res.status(404).json({
           success: false,
           message: "Patient not found",
         });
       }
 
-      // Step 3: Prepare blood pressure string and calculate BMI
-      const blood_pressure = `${blood_pressure_systolic}/${blood_pressure_diastolic}`;
-      const height_in_m = height / 100;
-      const bmi = (height_in_m > 0) ? (weight / (height_in_m * height_in_m)).toFixed(2) : 0;
+const { firstName, middleName, lastName, age, gender } = patientResult[0];
 
-      // Step 4: Insert into patient_vitals
-      const insertQuery = `
-        INSERT INTO patient_vitals (
-          patient_id, recorded_at, blood_pressure, respiratory_rate, pulse,
-          spo2, rbs_mg, rbs_nmol, temperature, weight, height, bmi,
-          risk_of_fall, urgency, notes
-        ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
-      `;
+const fullName = `${firstName} ${middleName || ''} ${lastName}`.trim().replace(/\s+/g, ' ');
 
-      const values = [
-        patient_id,
-        recorded_at,
-        blood_pressure,
-        respiratory_rate || 0,
-        pulse || 0,
-        spo2 || 0,
-        rbs_mg || 0,
-        rbs_nmol || 0,
-        temperature || 0,
-        weight,
-        height,
-        parseFloat(bmi),
-        risk_of_fall || 'Low',
-        urgency || 'Normal',
-        notes || ''
-      ];
+      // Optional: Fetch doctor name
+      const getDoctorName = () => {
+        return new Promise((resolve) => {
+          if (!doctor_id) return resolve(null);
 
-      pool.query(insertQuery, values, (insertErr, result) => {
-        if (insertErr) {
-          return res.status(500).json({
-            success: false,
-            message: "Error saving vitals",
-            error: insertErr.message,
+          pool.query(`SELECT fullName FROM doctors WHERE id = ?`, [doctor_id], (docErr, docRes) => {
+            if (docErr || !docRes.length) return resolve(null);
+            console.log(docRes);
+            
+            resolve(docRes[0].fullName);
           });
-        }
+        });
+      };
 
-        return res.status(201).json({
-          success: true,
-          message: "Patient vitals recorded successfully",
-          vitalsId: result.insertId,
+      getDoctorName().then((doctorName) => {
+        // Step 3: Build values
+        const blood_pressure = `${blood_pressure_systolic}/${blood_pressure_diastolic}`;
+        const height_in_m = height / 100;
+        const bmi = (height_in_m > 0) ? (weight / (height_in_m * height_in_m)).toFixed(2) : 0;
+
+        // Step 4: Insert into DB
+        const insertQuery = `
+          INSERT INTO patient_vitals (
+            patient_id, patient_name, doctor_id, doctor_name, age, gender, recorded_at, blood_pressure, 
+            respiratory_rate, pulse, spo2, rbs_mg, rbs_nmol, bp_position, temperature, weight, height, bmi,
+            risk_of_fall, urgency, notes
+          ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+        `;
+
+        const values = [
+          patient_id,
+          fullName,
+          doctor_id || null,
+          doctorName,
+          age,
+          gender,
+          recorded_at,
+          blood_pressure,
+          respiratory_rate || 0,
+          pulse || 0,
+          spo2 || 0,
+          rbs_mg || 0,
+          rbs_nmol || 0,
+          bp_position || null,
+          temperature || 0,
+          weight,
+          height,
+          parseFloat(bmi),
+          risk_of_fall || 'Low',
+          urgency || 'Normal',
+          notes || ''
+        ];
+
+        pool.query(insertQuery, values, (insertErr, result) => {
+          if (insertErr) {
+            return res.status(500).json({
+              success: false,
+              message: "Error saving vitals",
+              error: insertErr.message,
+            });
+          }
+
+          return res.status(201).json({
+            success: true,
+            message: "Patient vitals recorded successfully",
+            vitalsId: result.insertId,
+          });
         });
       });
     });
@@ -2313,9 +2342,10 @@ const getPatientVitalsByPatientId = async (req, res) => {
 
     const query = `
       SELECT 
-        id, patient_id, nurse, recorded_at, blood_pressure_systolic, 
-        blood_pressure_diastolic, heart_rate, respiratory_rate, temperature, 
-        weight, height, bmi, oxygen_saturation, notes 
+        id, patient_id, patient_name, doctor_id, doctor_name, age, gender, 
+        recorded_at, blood_pressure, respiratory_rate, pulse, spo2, rbs_mg, 
+        rbs_nmol, bp_position, temperature, weight, height, bmi, 
+        risk_of_fall, urgency, notes 
       FROM patient_vitals 
       WHERE patient_id = ? 
       ORDER BY recorded_at DESC
@@ -2339,7 +2369,7 @@ const getPatientVitalsByPatientId = async (req, res) => {
 
       return res.status(200).json({
         success: true,
-        message: "Vitals retrieved successfully",
+        message: "Patient vitals retrieved successfully",
         vitals: results,
       });
     });
@@ -2446,6 +2476,51 @@ const updatePatientVitals = async (req, res) => {
     });
   }
 };
+
+const deletePatientVital = async (req, res) => {
+  try {
+    const { id, patientId } = req.params;
+
+    if (!id || !patientId) {
+      return res.status(400).json({
+        success: false,
+        message: 'Missing id or patientId in parameters',
+      });
+    }
+
+    const query = 'DELETE FROM patient_vitals WHERE id = ? AND patient_id = ?';
+
+    pool.query(query, [id, patientId], (err, result) => {
+      if (err) {
+        return res.status(500).json({
+          success: false,
+          message: 'Failed to delete patient vital record',
+          error: err.message,
+        });
+      }
+
+      if (result.affectedRows === 0) {
+        return res.status(404).json({
+          success: false,
+          message: 'No record found with the given id and patient_id',
+        });
+      }
+
+      return res.status(200).json({
+        success: true,
+        message: 'Patient vital record deleted successfully',
+      });
+    });
+
+  } catch (error) {
+    return res.status(500).json({
+      success: false,
+      message: 'Internal server error',
+      error: error.message,
+    });
+  }
+};
+
 
 const recordPatientDiagnosis = (req, res) => {
   const {
@@ -2601,6 +2676,101 @@ const getDiagnosisByPatientId = async (req, res) => {
   }
 };
 
+const addRxMedicine = async (req, res) => {
+  try {
+    const {
+      medicine_name,
+      strength,
+      unit,
+      pharmaceutical_form,
+      frequency,
+      duration,
+      notes,
+      route,
+      product_type,
+      active_substances
+    } = req.body;
+
+    // Validate required fields
+    if (!medicine_name) {
+      return res.status(400).json({ success: false, message: "Medicine name is required" });
+    }
+
+    // Check if medicine already exists (by name)
+    const checkQuery = 'SELECT * FROM rx_list WHERE medicine_name = ?';
+    pool.query(checkQuery, [medicine_name], (checkErr, checkResult) => {
+      if (checkErr) {
+        return res.status(500).json({
+          success: false,
+          message: "Error checking for existing medicine",
+          error: checkErr.message
+        });
+      }
+
+      if (checkResult.length > 0) {
+        return res.status(400).json({
+          success: false,
+          message: "Medicine already exists",
+          data: checkResult[0]
+        });
+      }
+
+      // Insert new medicine
+      const insertQuery = `
+        INSERT INTO rx_list (
+          medicine_name,
+          strength,
+          unit,
+          pharmaceutical_form,
+          frequency,
+          duration,
+          notes,
+          route,
+          product_type,
+          active_substances
+        ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+      `;
+
+      const values = [
+        medicine_name,
+        strength,
+        unit,
+        pharmaceutical_form,
+        frequency,
+        duration,
+        notes,
+        route,
+        product_type,
+        active_substances
+      ];
+
+      pool.query(insertQuery, values, (insertErr, insertResult) => {
+        if (insertErr) {
+          return res.status(500).json({
+            success: false,
+            message: "Failed to insert medicine",
+            error: insertErr.message
+          });
+        }
+
+        return res.status(201).json({
+          success: true,
+          message: "Medicine added successfully",
+          insertId: insertResult.insertId
+        });
+      });
+    });
+
+  } catch (error) {
+    return res.status(500).json({
+      success: false,
+      message: "Internal server error",
+      error: error.message
+    });
+  }
+};
+
+
 const getAllRxList = async (req, res) => {
   try {
     const fetchRxList = () => {
@@ -2653,6 +2823,246 @@ const getAllRxList = async (req, res) => {
     });
   }
 };
+
+const deleteRxMedicine = async (req, res) => {
+  try {
+    const { id } = req.params;
+
+    // Validate
+    if (!id) {
+      return res.status(400).json({
+        success: false,
+        message: "Medicine ID is required"
+      });
+    }
+
+    // Check if medicine exists
+    const checkQuery = 'SELECT * FROM rx_list WHERE id = ?';
+    pool.query(checkQuery, [id], (checkErr, checkResult) => {
+      if (checkErr) {
+        return res.status(500).json({
+          success: false,
+          message: "Error checking medicine existence",
+          error: checkErr.message
+        });
+      }
+
+      if (checkResult.length === 0) {
+        return res.status(404).json({
+          success: false,
+          message: "Medicine not found"
+        });
+      }
+
+      // Delete the medicine
+      const deleteQuery = 'DELETE FROM rx_list WHERE id = ?';
+      pool.query(deleteQuery, [id], (deleteErr, deleteResult) => {
+        if (deleteErr) {
+          return res.status(500).json({
+            success: false,
+            message: "Failed to delete medicine",
+            error: deleteErr.message
+          });
+        }
+
+        return res.status(200).json({
+          success: true,
+          message: "Medicine deleted successfully"
+        });
+      });
+    });
+
+  } catch (error) {
+    return res.status(500).json({
+      success: false,
+      message: "Internal server error",
+      error: error.message
+    });
+  }
+};
+
+
+const addCategories = async (req, res) => {
+  try {
+    const { name, description } = req.body;
+
+    // Validation
+    if (!name) {
+      return res.status(400).json({
+        success: false,
+        message: "name is required",
+      });
+    }
+
+    if (!description) {
+      return res.status(400).json({
+        success: false,
+        message: "description is required",
+      });
+    }
+
+    // Check if category name already exists
+    const duplicateCheckQuery = 'SELECT * FROM categories WHERE name = ?';
+    pool.query(duplicateCheckQuery, [name], (dupErr, dupResult) => {
+      if (dupErr) {
+        return res.status(500).json({
+          success: false,
+          message: "Error checking existing category",
+          error: dupErr.message,
+        });
+      }
+
+      if (dupResult.length > 0) {
+        return res.status(400).json({
+          success: false,
+          message: "Category with this name already exists",
+        });
+      }
+
+      // Insert new category
+      const insertQuery = `INSERT INTO categories (name, description) VALUES (?, ?)`;
+      pool.query(insertQuery, [name, description], (insertErr, insertResult) => {
+        if (insertErr) {
+          return res.status(500).json({
+            success: false,
+            message: 'Database insertion failed',
+            error: insertErr.message,
+          });
+        }
+
+        // Fetch the inserted category (optional)
+        const selectQuery = 'SELECT * FROM categories WHERE id = ?';
+        const insertedId = insertResult.insertId;
+
+        pool.query(selectQuery, [insertedId], (selectErr, selectResult) => {
+          if (selectErr) {
+            return res.status(500).json({
+              success: false,
+              message: 'Error fetching inserted category',
+              error: selectErr.message,
+            });
+          }
+
+          return res.status(201).json({
+            success: true,
+            message: 'Category inserted successfully',
+            data: selectResult[0],
+          });
+        });
+      });
+    });
+
+  } catch (error) {
+    return res.status(500).json({
+      success: false,
+      message: "Internal server error",
+      error: error.message,
+    });
+  }
+};
+
+const getAllCategories = async (req, res) => {
+  try {
+    const query = 'SELECT * FROM categories';
+    
+    pool.query(query, (err, results) => {
+      if (err) {
+        return res.status(500).json({
+          success: false,
+          message: 'Failed to retrieve categories',
+          error: err.message
+        });
+      }
+
+      if (results.length === 0) {
+        return res.status(200).json({
+          success: true,
+          message: 'No categories found',
+          data: []
+        });
+      }
+
+      return res.status(200).json({
+        success: true,
+        message: 'Categories retrieved successfully',
+        data: results
+      });
+    });
+    
+  } catch (error) {
+    return res.status(500).json({
+      success: false,
+      message: 'Internal server error',
+      error: error.message
+    });
+  }
+};
+
+const updateCategory = async (req, res) => {
+  const { id } = req.params;
+
+  const { name, description } = req.body;
+
+  // Step 1: Check if category exists
+  const selectQuery = 'SELECT * FROM categories WHERE id = ?';
+  pool.query(selectQuery, [id], (selectErr, selectResult) => {
+    if (selectErr) {
+      return res.status(500).json({
+        success: false,
+        message: "Error fetching category",
+        error: selectErr.message
+      });
+    }
+
+    if (selectResult.length === 0) {
+      return res.status(404).json({
+        success: false,
+        message: "Category not found"
+      });
+    }
+
+    const existingCategory = selectResult[0];
+
+    // Step 2: Fallback to existing values if not provided in request
+    const updatedName = name || existingCategory.name;
+    const updatedDescription = description || existingCategory.description;
+
+    // Step 3: Perform the update
+    const updateQuery = 'UPDATE categories SET name = ?, description = ? WHERE id = ?';
+    pool.query(updateQuery, [updatedName, updatedDescription, id], (updateErr, updateResult) => {
+      if (updateErr) {
+        return res.status(500).json({
+          success: false,
+          message: "Error updating category",
+          error: updateErr.message
+        });
+      }
+
+      return res.status(200).json({
+        success: true,
+        message: "Category updated successfully",
+        data: {
+          id,
+          name: updatedName,
+          description: updatedDescription
+        }
+      });
+    });
+  });
+};
+
+const deleteCategory = async (req, res) => {
+  const { id } = req.params;
+  const deleteQuery = 'DELETE FROM categories WHERE id = ?';
+  pool.query(deleteQuery, [id], (err, result) => {
+    if (err) return res.status(500).json({ success: false, error: err.message });
+    if (result.affectedRows === 0) {
+      return res.status(404).json({ success: false, message: "Category not found" });
+    }
+    res.status(200).json({ success: true, message: "Category deleted" });
+  });
+};
+
 
 const addDrug = async (req, res) => {
   const {
@@ -2763,7 +3173,7 @@ const addDrug = async (req, res) => {
 
 const getDrugs = async (req, res) => {
   try {
-    const query = `SELECT * FROM drugs ORDER BY id ASC`;
+    const query = `SELECT * FROM drugs where is_deleted = 0 ORDER BY id ASC `;
 
     pool.query(query, (err, results) => {
       if (err) {
@@ -2796,6 +3206,7 @@ const getDrugs = async (req, res) => {
   }
 };
 
+
 const updateDrug = async (req, res) => {
   try {
     const { drugId } = req.params;
@@ -2807,25 +3218,32 @@ const updateDrug = async (req, res) => {
       });
     }
 
-    // Step 1: Get existing drug record
+    // Step 1: Fetch existing drug data
     const getQuery = `SELECT * FROM drugs WHERE id = ?`;
     pool.query(getQuery, [drugId], (getErr, getResults) => {
-      if (getErr || getResults.length === 0) {
+      if (getErr) {
+        return res.status(500).json({
+          success: false,
+          message: "Error fetching drug",
+          error: getErr.message,
+        });
+      }
+
+      if (getResults.length === 0) {
         return res.status(404).json({
           success: false,
-          message: "Drug record not found",
-          error: getErr?.message,
+          message: "Drug not found",
         });
       }
 
       const existing = getResults[0];
+      const image = req.file ? req.file.filename : existing.image;
 
-      // Step 2: Prepare updated fields, use existing if not provided in req.body
+      // Step 2: Merge values (fallback to existing)
       const updatedFields = {
         name: req.body.name || existing.name,
         substance: req.body.substance || existing.substance,
-        unit_of_measurement:
-          req.body.unit_of_measurement || existing.unit_of_measurement,
+        unit_of_measurement: req.body.unit_of_measurement || existing.unit_of_measurement,
         company: req.body.company || existing.company,
         quality: req.body.quality || existing.quality,
         expiration_date: req.body.expiration_date || existing.expiration_date,
@@ -2833,10 +3251,10 @@ const updateDrug = async (req, res) => {
         price: req.body.price !== undefined ? req.body.price : existing.price,
         category: req.body.category || existing.category,
         strength: req.body.strength || existing.strength,
-        image: req.body.image || existing.image,
+        image: image,
       };
 
-      // Step 3: Build update query and values
+      // Step 3: Run the update
       const updateQuery = `
         UPDATE drugs SET
           name = ?, substance = ?, unit_of_measurement = ?, company = ?, quality = ?,
@@ -2844,7 +3262,7 @@ const updateDrug = async (req, res) => {
         WHERE id = ?
       `;
 
-      const updateValues = [
+      const values = [
         updatedFields.name,
         updatedFields.substance,
         updatedFields.unit_of_measurement,
@@ -2859,8 +3277,7 @@ const updateDrug = async (req, res) => {
         drugId,
       ];
 
-      // Step 4: Run update query
-      pool.query(updateQuery, updateValues, (updateErr) => {
+      pool.query(updateQuery, values, (updateErr) => {
         if (updateErr) {
           return res.status(500).json({
             success: false,
@@ -2883,6 +3300,65 @@ const updateDrug = async (req, res) => {
     });
   }
 };
+
+const deleteDrug = async (req, res) => {
+  try {
+    const { drugId } = req.params;
+    console.log(drugId);
+    
+    if (!drugId) {
+      return res.status(400).json({
+        success: false,
+        message: "Missing drugId in request params",
+      });
+    }
+
+    // Step 1: Check if drug exists and is not already deleted
+    const checkQuery = `SELECT * FROM drugs WHERE id = ? AND is_deleted = 0`;
+    pool.query(checkQuery, [drugId], (checkErr, checkResult) => {
+      console.log(checkResult);
+      
+      if (checkErr) {
+        return res.status(500).json({
+          success: false,
+          message: "Error checking drug",
+          error: checkErr.message,
+        });
+      }
+
+      if (checkResult.length === 0) {
+        return res.status(404).json({
+          success: false,
+          message: "Drug not found or already deleted",
+        });
+      }
+
+      // Step 2: Perform soft delete
+      const deleteQuery = `UPDATE drugs SET is_deleted = 1 WHERE id = ?`;
+      pool.query(deleteQuery, [drugId], (deleteErr, result) => {
+        if (deleteErr) {
+          return res.status(500).json({
+            success: false,
+            message: "Error deleting drug",
+            error: deleteErr.message,
+          });
+        }
+
+        return res.status(200).json({
+          success: true,
+          message: "Drug soft-deleted successfully",
+        });
+      });
+    });
+  } catch (error) {
+    return res.status(500).json({
+      success: false,
+      message: "Server error",
+      error: error.message,
+    });
+  }
+};
+
 
 const addServices = async (req, res) => {
   try {
@@ -3093,12 +3569,20 @@ export default {
   recordPatientVitals,
   getPatientVitalsByPatientId,
   updatePatientVitals,
+  deletePatientVital,
   recordPatientDiagnosis,
   getDiagnosisByPatientId,
+  addRxMedicine,
   getAllRxList,
-  addDrug,
+  deleteRxMedicine,
+  addCategories,
+  getAllCategories,
+  updateCategory,
+  deleteCategory,
   getDrugs,
+  addDrug,
   updateDrug,
+  deleteDrug,
   addServices,
   getServices,
   getNationalitiesList,

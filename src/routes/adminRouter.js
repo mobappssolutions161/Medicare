@@ -50,15 +50,24 @@ router.put("/cancelAppointmentStatus/:appointmentId", adminController.cancelAppo
 router.post("/recordPatientVitals", adminController.recordPatientVitals)
 router.get("/getPatientVitalsByPatientId/:patientId", adminController.getPatientVitalsByPatientId)
 router.put("/updatePatientVitals/:vitalId", adminController.updatePatientVitals)
+router.delete("/deletePatientVital/:id/:patientId", adminController.deletePatientVital)
 
 router.post("/recordPatientDiagnosis", adminController.recordPatientDiagnosis)
 router.get("/getDiagnosisByPatientId/:patientId", adminController.getDiagnosisByPatientId)
 
+router.post("/addRxMedicine", adminController.addRxMedicine)
 router.get("/getAllRxList",adminController.getAllRxList)
+router.delete("/deleteRxMedicine/:id", adminController.deleteRxMedicine)
+
+router.post("/addCategories", adminController.addCategories)
+router.get("/getAllCategories", adminController.getAllCategories)
+router.put("/updateCategory/:id",adminController.updateCategory)
+router.delete("/deleteCategory/:id", adminController.deleteCategory)
 
 router.post("/addDrug", upload.single("image"), adminController.addDrug)
 router.get("/getDrugs", adminController.getDrugs)
-router.put("/updateDrug/:drugId", adminController.updateDrug)
+router.put("/updateDrug/:drugId",upload.single("image"), adminController.updateDrug)
+router.delete("/deleteDrug/:drugId", adminController.deleteDrug)
 
 router.post("/addServices", adminController.addServices)
 router.get("/getServices", adminController.getServices)
