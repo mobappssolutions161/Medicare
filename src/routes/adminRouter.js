@@ -40,7 +40,7 @@ router.get("/getWaitingAppointments", adminController.getWaitingAppointments)
 router.get("/getConfirmedAppointments", adminController.getConfirmedAppointments)
 router.delete("/deleteAppointments/:id/:patientId", adminController.deleteAppointments)
 router.post("/doctorAvailability", adminController.doctorAvailability)
-router.post("/appointmentByDoctorId/:doctorId", adminController.appointmentByDoctorId)
+router.post("/appointmentByDoctorId", adminController.appointmentByDoctorId)
 router.post("/getAppointmentsByDate", adminController.getAppointmentsByDate)
 router.post("/appointmentByPatientId/:patientId", adminController.appointmentByPatientId)
 
@@ -57,7 +57,8 @@ router.post("/recordPatientDiagnosis", adminController.recordPatientDiagnosis)
 router.get("/getDiagnosisByPatientId/:patientId", adminController.getDiagnosisByPatientId)
 
 router.post("/addRxMedicine", adminController.addRxMedicine)
-router.get("/getAllRxList",adminController.getAllRxList)
+router.get("/getAllRxList", adminController.getAllRxList)
+router.get("/getRxById/:rxId",adminController.getRxById)
 router.delete("/deleteRxMedicine/:id", adminController.deleteRxMedicine)
 
 router.post("/addCategories", adminController.addCategories)
@@ -67,10 +68,18 @@ router.delete("/deleteCategory/:id", adminController.deleteCategory)
 
 router.post("/addDrug", upload.single("image"), adminController.addDrug)
 router.get("/getDrugs", adminController.getDrugs)
+router.get("/getDrugById/:drugId", adminController.getDrugById)
 router.put("/updateDrug/:drugId",upload.single("image"), adminController.updateDrug)
 router.delete("/deleteDrug/:drugId", adminController.deleteDrug)
 
 router.post("/addServices", adminController.addServices)
 router.get("/getServices", adminController.getServices)
+
+router.post("/addLabs", adminController.addLabs)
+router.get("/getAllLabs", adminController.getAllLabs)
+router.get("/getLabById/:labId", adminController.getLabById)
+router.put("/updateLabById/:labId", adminController.updateLabById)
+router.delete("/deleteLabById/:labId", adminController.deleteLabById)
+router.put("/changeLabStatus/:labId", adminController.changeLabStatus)
 
 export default router;

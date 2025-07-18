@@ -366,7 +366,6 @@ const changeDoctorStatus = async (req, res) => {
   }
 };
 
-
 const changeUserStatus = async (req, res) => {
   try {
     const userId = req.params.userId;
@@ -1293,15 +1292,14 @@ const createAppointment = (req, res) => {
     reason,
   } = req.body;
 
-  
-  if (!patientId || !appointmentDate ){
+  if (!patientId || !appointmentDate) {
     return res.status(400).json({
       success: false,
       message: "Patient ID and appointment date are required",
     });
   }
 
-  //  Convert times to comparable Date objects (base day doesn't matter)
+  // Convert times to comparable Date objects
   const parseTime = (t) => new Date(`1970-01-01T${t}`);
 
   const start = parseTime(startTime);
@@ -1309,11 +1307,12 @@ const createAppointment = (req, res) => {
   const noon = parseTime("12:00:00");
   const midnight = parseTime("23:59:59");
 
-  //  Validate time is in allowed window: between 12:00 PM and 12:00 AM
+  // Validate time is in allowed window
   if (start < noon || end > midnight || start >= end) {
     return res.status(400).json({
       success: false,
-      message: "Appointment time must be between 12:00 PM and 12:00 AM, and startTime must be before endTime",
+      message:
+        "Appointment time must be between 12:00 PM and 12:00 AM, and startTime must be before endTime",
     });
   }
 
@@ -1337,7 +1336,6 @@ const createAppointment = (req, res) => {
     const patientName =
       patientResult[0].firstName + " " + patientResult[0].lastName;
 
-    //  Check for overlapping appointments for this patient or doctor
     const overlapQuery = `
       SELECT * FROM appointments 
       WHERE appointmentDate = ?
@@ -1357,7 +1355,7 @@ const createAppointment = (req, res) => {
       [
         appointmentDate,
         patientId,
-        userDoctorId || 0, // use 0 if doctor not provided
+        userDoctorId || 0,
         startTime,
         endTime,
         startTime,
@@ -1377,11 +1375,12 @@ const createAppointment = (req, res) => {
         if (overlapResults.length > 0) {
           return res.status(409).json({
             success: false,
-            message: "Appointment overlaps with an existing one for the patient or doctor",
+            message:
+              "Appointment overlaps with an existing one for the patient or doctor",
           });
         }
 
-        //  Continue with doctor check
+        // Check for doctor if provided
         if (userDoctorId) {
           const doctorQuery = `SELECT * FROM doctors WHERE id = ?`;
           pool.query(doctorQuery, [userDoctorId], (err, doctorResult) => {
@@ -1412,7 +1411,9 @@ const createAppointment = (req, res) => {
               startTime,
               endTime,
               reason,
-              res
+              res,
+              patientResult[0],
+              doctorResult[0]
             );
           });
         } else {
@@ -1426,7 +1427,9 @@ const createAppointment = (req, res) => {
             startTime,
             endTime,
             reason,
-            res
+            res,
+            patientResult[0],
+            {}
           );
         }
       }
@@ -1434,11 +1437,96 @@ const createAppointment = (req, res) => {
   });
 };
 
+const insertAppointment = (
+  patientId,
+  patientName,
+  doctorId,
+  doctorName,
+  appointmentDate,
+  startTime,
+  endTime,
+  reason,
+  res,
+  // patientData,
+  // doctorData = {}
+) => {
+  const isConfirmed = doctorId && startTime && endTime;
+  const status = isConfirmed ? "Booked" : "waiting";
+
+  // Duration calculation (in minutes)
+  const getDurationInMinutes = (start, end) => {
+    const [sh, sm] = start.split(":").map(Number);
+    const [eh, em] = end.split(":").map(Number);
+    const startDate = new Date(1970, 0, 1, sh, sm);
+    const endDate = new Date(1970, 0, 1, eh, em);
+    return Math.round((endDate - startDate) / (1000 * 60));
+  };
+
+  const duration = isConfirmed ? getDurationInMinutes(startTime, endTime) : 30;
+
+  const insertQuery = `
+    INSERT INTO appointments 
+    (patientId, patientName, doctorId, doctorName, appointmentDate, startTime, endTime, reason, status, duration)
+    VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+  `;
+
+  pool.query(
+    insertQuery,
+    [
+      patientId,
+      patientName,
+      doctorId,
+      doctorName,
+      appointmentDate,
+      startTime,
+      endTime,
+      reason,
+      status,
+      duration,
+    ],
+    (err, result) => {
+      if (err) {
+        return res.status(500).json({
+          success: false,
+          message: "Error inserting appointment",
+          error: err.message,
+        });
+      }
+
+      return res.status(201).json({
+        success: true,
+        message: "Appointment created successfully",
+        data: {
+          appointmentId: result.insertId,
+          status,
+          duration
+        },
+      });
+    }
+  );
+};
+
 const getAllAppointments = async (req, res) => {
   try {
     const fetchAppointments = () => {
       return new Promise((resolve, reject) => {
-        const query = "SELECT * FROM appointments";
+        const query = `
+          SELECT 
+            a.*, 
+            p.id AS patientId,
+            p.fileNumber,
+            p.firstName,
+            p.middleName,
+            p.lastName,
+            p.gender,
+            p.dateOfBirth,
+            p.mobileNumber,
+            p.email,
+            p.address
+          FROM appointments a
+          JOIN patients p ON a.patientId = p.id
+        `;
+
         pool.query(query, (err, results) => {
           if (err) return reject(err);
           resolve(results);
@@ -1458,7 +1546,7 @@ const getAllAppointments = async (req, res) => {
 
     return res.status(200).json({
       success: true,
-      message: "Appointments fetched successfully",
+      message: "Appointments with patient info fetched successfully",
       data: appointments,
     });
   } catch (error) {
@@ -1754,58 +1842,6 @@ const deleteAppointments = async (req, res) => {
       error: error.message,
     });
   }
-};
-
-const insertAppointment = (
-  patientId,
-  patientName,
-  doctorId,
-  doctorName,
-  appointmentDate,
-  startTime,
-  endTime,
-  reason,
-  res
-) => {
-  const isConfirmed = doctorId && startTime && endTime;
-  const status = isConfirmed ? "confirmed" : "waiting";
-
-  const insertQuery = `
-    INSERT INTO appointments (patientId , patientName , doctorId , doctorName , appointmentDate, startTime, endTime , reason, status)
-    VALUES (?, ?, ?, ?,?, ?, ?,?,?)`;
-
-  pool.query(
-    insertQuery,
-    [
-      patientId,
-      patientName,
-      doctorId,
-      doctorName,
-      appointmentDate,
-      startTime,
-      endTime,
-      reason,
-      status,
-    ],
-    (err, result) => {
-      if (err) {
-        return res.status(500).json({
-          success: false,
-          message: "Error inserting appointment",
-          error: err.message,
-        });
-      }
-
-      return res.status(201).json({
-        success: true,
-        message: "Appointment created successfully",
-        data: {
-          appointmentId: result.insertId,
-          status,
-        },
-      });
-    }
-  );
 };
 
 const getAllNationalities = async (req, res) => {
@@ -2960,6 +2996,67 @@ const getAllRxList = async (req, res) => {
   }
 };
 
+const getRxById = async (req, res) => {
+  try {
+    const rxId = req.params.rxId;
+
+    if (!rxId) {
+      return res.status(400).json({
+        success: false,
+        message: "Rx ID is required",
+      });
+    }
+
+    const query = `
+      SELECT 
+        id AS rxId,
+        medicine_name AS medicineName,
+        strength,
+        unit,
+        pharmaceutical_form AS form,
+        frequency,
+        duration,
+        notes,
+        route,
+        product_type AS productType,
+        active_substances AS activeSubstances
+      FROM rx_list
+      WHERE id = ?
+    `;
+
+    pool.query(query, [rxId], (err, results) => {
+      if (err) {
+        return res.status(500).json({
+          success: false,
+          message: "An error occurred while retrieving the medicine",
+          error: err.message,
+        });
+      }
+
+      if (!results.length) {
+        return res.status(404).json({
+          success: false,
+          message: "Medicine not found",
+        });
+      }
+
+      return res.status(200).json({
+        success: true,
+        message: "Medicine fetched successfully",
+        data: results[0],
+      });
+    });
+
+  } catch (error) {
+    console.error("Error fetching rx by ID:", error);
+    return res.status(500).json({
+      success: false,
+      message: "Internal Server Error",
+      error: error.message,
+    });
+  }
+};
+
 const deleteRxMedicine = async (req, res) => {
   try {
     const { id } = req.params;
@@ -3318,7 +3415,7 @@ const getDrugs = async (req, res) => {
       }
 
       if (!results || results.length === 0) {
-        return res.status(200).json({
+        return res.status(404).json({
           success: true,
           message: "No drugs found",
           data: [],
@@ -3329,6 +3426,52 @@ const getDrugs = async (req, res) => {
         success: true,
         message: "Drugs data fetched successfully",
         data: results,
+      });
+    });
+  } catch (error) {
+    return res.status(500).json({
+      success: false,
+      message: "Internal Server Error",
+      error: error.message,
+    });
+  }
+};
+
+const getDrugById = async (req, res) => {
+  try {
+    const drugId = req.params.drugId;
+
+    if (!drugId) {
+      return res.status(400).json({
+        success: false,
+        message: "Drug ID is required",
+      });
+    }
+
+    const query = `SELECT * FROM drugs WHERE id = ? AND is_deleted = 0`;
+
+    pool.query(query, [drugId], (err, results) => {
+      console.log(results);
+      
+      if (err) {
+        return res.status(500).json({
+          success: false,
+          message: "Database query failed",
+          error: err.message,
+        });
+      }
+
+      if (!results.length) {
+        return res.status(404).json({
+          success: false,
+          message: "Drug not found",
+        });
+      }
+
+      return res.status(200).json({
+        success: true,
+        message: "Drug data fetched successfully",
+        data: results[0],
       });
     });
   } catch (error) {
@@ -3670,7 +3813,78 @@ const getDiagnosisList = async (req, res) => {
 
 const addLabs = async(req,res)=>{
   try {
+    const {lab_name,notes,email,address,phone,speciality}=  req.body
+
+      if (!lab_name) {
+      return res.status(400).json({
+        success: false,
+        message:"Missing required fields: lab_name",
+      });
+    }
+      if (!email) {
+      return res.status(400).json({
+        success: false,
+        message:"Missing required fields: email",
+      });
+    }
     
+    if (!phone) {
+    return res.status(400).json({
+      success: false,
+      message:"Missing required fields: phone",
+    });
+  }
+    if (!address) {
+    return res.status(400).json({
+      success: false,
+      message:"Missing required fields: address",
+    });
+  }
+
+  const checkQuery = `SELECT * FROM labs WHERE email = ? OR phone_number = ?`;
+  pool.query(checkQuery,[email,phone],(checkErr,checkResult)=>{
+    if(checkErr){
+      return res.status(500).json({
+      success: false,
+      message: "An error occurred while checking for existing records",
+    });
+  }
+
+    if(checkResult.length>0){
+      return res.status(500).json({
+      success: false,
+      message: "Record already exists. Duplicate entries are not allowed.",
+    });
+  }
+
+
+  const insertQuery = `INSERT INTO labs (lab_name, email, phone_number, speciality, notes, address) 
+                     VALUES (?, ?, ?, ?, ?, ?)`;
+
+pool.query(insertQuery, [lab_name, email, phone, speciality, notes, address], (insertError, insertData) => {
+  if (insertError) {
+    return res.status(500).json({
+      success: false,
+      message: "Error inserting lab record",
+      error: insertError.message,
+    });
+  }
+
+  return res.status(201).json({
+    success: true,
+    message: "Lab added successfully",
+    data: {
+      labId: insertData.insertId,
+      lab_name,
+      email,
+      phone,
+      speciality,
+      notes,
+      address
+    }
+  });
+});
+  })
   } catch (error) {
     return res.status(500).json({
       success: false,
@@ -3679,6 +3893,297 @@ const addLabs = async(req,res)=>{
     });
   }
 }
+
+const getAllLabs = async (req, res) => {
+  try {
+    const getQuery = `SELECT * FROM labs WHERE is_active = 1`;
+
+    pool.query(getQuery, (getErr, getResult) => {
+      if (getErr) {
+        return res.status(500).json({
+          success: false,
+          message: "Error retrieving lab records",
+          error: getErr.message,
+        });
+      }
+
+      if (!getResult || getResult.length === 0) {
+        return res.status(200).json({
+          success: true,
+          message: "No active labs found",
+          data: [],
+        });
+      }
+
+      return res.status(200).json({
+        success: true,
+        message: "Active labs fetched successfully",
+        data: getResult,
+      });
+    });
+  } catch (error) {
+    return res.status(500).json({
+      success: false,
+      message: "Internal Server Error",
+      error: error.message,
+    });
+  }
+};
+
+const getLabById = async (req, res) => {
+  try {
+    const labId = req.params.labId;
+
+    if (!labId) {
+      return res.status(400).json({
+        success: false,
+        message: "Lab ID is required",
+      });
+    }
+
+    const getQuery = `SELECT * FROM labs WHERE id = ?`;
+
+    pool.query(getQuery, [labId], (err, result) => {
+      if (err) {
+        return res.status(500).json({
+          success: false,
+          message: "Error fetching lab details",
+          error: err.message,
+        });
+      }
+
+      if (result.length === 0) {
+        return res.status(404).json({
+          success: false,
+          message: "Lab not found",
+        });
+      }
+
+      return res.status(200).json({
+        success: true,
+        message: "Lab details retrieved successfully",
+        data: result[0],
+      });
+    });
+  } catch (error) {
+    return res.status(500).json({
+      success: false,
+      message: "Internal server error",
+      error: error.message,
+    });
+  }
+};
+
+const updateLabById = async (req, res) => {
+  try {
+    const labId = req.params.labId;
+    const { lab_name, email, phone, speciality, notes, address } = req.body;
+
+    if (!labId) {
+      return res.status(400).json({
+        success: false,
+        message: "Lab ID is required",
+      });
+    }
+
+    // Step 1: Fetch existing lab record
+    const getQuery = `SELECT * FROM labs WHERE id = ?`;
+    pool.query(getQuery, [labId], (getErr, getResult) => {
+      if (getErr) {
+        return res.status(500).json({
+          success: false,
+          message: "Error retrieving lab data",
+          error: getErr.message,
+        });
+      }
+
+      if (getResult.length === 0) {
+        return res.status(404).json({
+          success: false,
+          message: "Lab not found",
+        });
+      }
+
+      const existing = getResult[0];
+
+      // Step 2: Prepare updated values (use new value if passed, else keep existing)
+      const updatedLabName = lab_name || existing.lab_name;
+      const updatedEmail = email || existing.email;
+      const updatedPhone = phone || existing.phone_number;
+      const updatedSpeciality = speciality || existing.speciality;
+      const updatedNotes = notes || existing.notes;
+      const updatedAddress = address || existing.address;
+
+      // Step 3: Update query
+      const updateQuery = `
+        UPDATE labs
+        SET lab_name = ?, email = ?, phone_number = ?, speciality = ?, notes = ?, address = ?
+        WHERE id = ?
+      `;
+
+      pool.query(
+        updateQuery,
+        [
+          updatedLabName,
+          updatedEmail,
+          updatedPhone,
+          updatedSpeciality,
+          updatedNotes,
+          updatedAddress,
+          labId,
+        ],
+        (updateErr, updateResult) => {
+          if (updateErr) {
+            return res.status(500).json({
+              success: false,
+              message: "Error updating lab data",
+              error: updateErr.message,
+            });
+          }
+
+          return res.status(200).json({
+            success: true,
+            message: "Lab updated successfully",
+          });
+        }
+      );
+    });
+  } catch (error) {
+    return res.status(500).json({
+      success: false,
+      message: "Internal server error",
+      error: error.message,
+    });
+  }
+};
+
+const deleteLabById = async (req, res) => {
+  try {
+    const labId = req.params.labId;
+
+    if (!labId) {
+      return res.status(400).json({
+        success: false,
+        message: "Lab ID is required",
+      });
+    }
+
+    const checkQuery = `SELECT * FROM labs WHERE id = ?`;
+    pool.query(checkQuery, [labId], (checkErr, checkResult) => {
+      if (checkErr) {
+        return res.status(500).json({
+          success: false,
+          message: "Error checking lab existence",
+          error: checkErr.message,
+        });
+      }
+
+      if (checkResult.length === 0) {
+        return res.status(404).json({
+          success: false,
+          message: "Lab not found",
+        });
+      }
+
+      const deleteQuery = `DELETE FROM labs WHERE id = ?`;
+      pool.query(deleteQuery, [labId], (deleteErr, deleteResult) => {
+        if (deleteErr) {
+          return res.status(500).json({
+            success: false,
+            message: "Error deleting lab",
+            error: deleteErr.message,
+          });
+        }
+
+        return res.status(200).json({
+          success: true,
+          message: "Lab deleted successfully",
+        });
+      });
+    });
+  } catch (error) {
+    return res.status(500).json({
+      success: false,
+      message: "Internal Server Error",
+      error: error.message,
+    });
+  }
+};
+
+const changeLabStatus = async (req, res) => {
+  try {
+    const labId = req.params.labId;
+    const { status } = req.body;
+
+    // Validate inputs
+    if (!labId) {
+      return res.status(400).json({
+        success: false,
+        message: "Lab ID is required",
+      });
+    }
+
+    if (typeof status !== 'number' || ![0, 1].includes(status)) {
+      return res.status(400).json({
+        success: false,
+        message: "Valid 'status' (0 or 1) is required in body",
+      });
+    }
+
+    // First: Fetch current status
+    const checkQuery = `SELECT is_active FROM labs WHERE id = ?`;
+    pool.query(checkQuery, [labId], (checkErr, checkResult) => {
+      if (checkErr) {
+        return res.status(500).json({
+          success: false,
+          message: "Error checking current status",
+          error: checkErr.message,
+        });
+      }
+
+      if (!checkResult.length) {
+        return res.status(404).json({
+          success: false,
+          message: "Lab not found",
+        });
+      }
+
+      const currentStatus = checkResult[0].is_active;
+
+      // If same status
+      if (currentStatus === status) {
+        return res.status(409).json({
+          success: false,
+          message: `Lab is already ${status === 1 ? 'active' : 'inactive'}`,
+        });
+      }
+
+      // Proceed with update
+      const updateQuery = `UPDATE labs SET is_active = ? WHERE id = ?`;
+      pool.query(updateQuery, [status, labId], (updateErr, updateResult) => {
+        if (updateErr) {
+          return res.status(500).json({
+            success: false,
+            message: "Error updating lab status",
+            error: updateErr.message,
+          });
+        }
+
+        return res.status(200).json({
+          success: true,
+          message: `Lab status changed to ${status === 1 ? 'active' : 'inactive'}`,
+        });
+      });
+    });
+
+  } catch (error) {
+    return res.status(500).json({
+      success: false,
+      message: "Internal server error",
+      error: error.message,
+    });
+  }
+};
 
 export default {
   getAllUsers,
@@ -3719,18 +4224,26 @@ export default {
   getDiagnosisByPatientId,
   addRxMedicine,
   getAllRxList,
+  getRxById,
   deleteRxMedicine,
   addCategories,
   getAllCategories,
   updateCategory,
   deleteCategory,
-  getDrugs,
   addDrug,
+  getDrugs,
+  getDrugById,
   updateDrug,
   deleteDrug,
   addServices,
   getServices,
   getNationalitiesList,
   getDiagnosisList,
+  addLabs,
+  getAllLabs,
+  getLabById,
+  updateLabById,
+  deleteLabById,
+  changeLabStatus
 };
 
