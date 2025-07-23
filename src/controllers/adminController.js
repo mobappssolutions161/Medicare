@@ -1299,42 +1299,28 @@ const createAppointment = (req, res) => {
     });
   }
 
-  // Convert times to comparable Date objects
   const parseTime = (t) => new Date(`1970-01-01T${t}`);
-
   const start = parseTime(startTime);
   const end = parseTime(endTime);
-  const noon = parseTime("12:00:00");
-  const midnight = parseTime("23:59:59");
 
-  // Validate time is in allowed window
-  if (start < noon || end > midnight || start >= end) {
+  if (start >= end) {
     return res.status(400).json({
       success: false,
-      message:
-        "Appointment time must be between 12:00 PM and 12:00 AM, and startTime must be before endTime",
+      message: "startTime must be before endTime",
     });
   }
 
   const patientQuery = `SELECT * FROM patients WHERE id = ?`;
   pool.query(patientQuery, [patientId], (err, patientResult) => {
     if (err) {
-      return res.status(500).json({
-        success: false,
-        message: "Error retrieving patient info",
-        error: err.message,
-      });
+      return res.status(500).json({ success: false, message: "Error retrieving patient info", error: err.message });
     }
 
     if (patientResult.length === 0) {
-      return res.status(404).json({
-        success: false,
-        message: "Patient not found",
-      });
+      return res.status(404).json({ success: false, message: "Patient not found" });
     }
 
-    const patientName =
-      patientResult[0].firstName + " " + patientResult[0].lastName;
+    const patientName = patientResult[0].firstName + " " + patientResult[0].lastName;
 
     const overlapQuery = `
       SELECT * FROM appointments 
@@ -1342,10 +1328,9 @@ const createAppointment = (req, res) => {
       AND (
         (patientId = ? OR doctorId = ?)
         AND (
-          (? BETWEEN startTime AND endTime)
-          OR (? BETWEEN startTime AND endTime)
-          OR (startTime BETWEEN ? AND ?)
-          OR (endTime BETWEEN ? AND ?)
+          (startTime < ? AND endTime > ?)
+          OR (startTime < ? AND endTime > ?)
+          OR (? <= startTime AND ? >= endTime)
         )
       )
     `;
@@ -1356,47 +1341,28 @@ const createAppointment = (req, res) => {
         appointmentDate,
         patientId,
         userDoctorId || 0,
-        startTime,
-        endTime,
-        startTime,
-        endTime,
-        startTime,
-        endTime,
+        startTime, startTime,
+        endTime, endTime,
+        startTime, endTime,
       ],
       (overlapErr, overlapResults) => {
         if (overlapErr) {
-          return res.status(500).json({
-            success: false,
-            message: "Error checking overlapping appointments",
-            error: overlapErr.message,
-          });
+          return res.status(500).json({ success: false, message: "Error checking overlapping appointments", error: overlapErr.message });
         }
 
         if (overlapResults.length > 0) {
-          return res.status(409).json({
-            success: false,
-            message:
-              "Appointment overlaps with an existing one for the patient or doctor",
-          });
+          return res.status(409).json({ success: false, message: "Appointment overlaps with an existing one for the patient or doctor" });
         }
 
-        // Check for doctor if provided
         if (userDoctorId) {
           const doctorQuery = `SELECT * FROM doctors WHERE id = ?`;
           pool.query(doctorQuery, [userDoctorId], (err, doctorResult) => {
             if (err) {
-              return res.status(500).json({
-                success: false,
-                message: "Error retrieving doctor info",
-                error: err.message,
-              });
+              return res.status(500).json({ success: false, message: "Error retrieving doctor info", error: err.message });
             }
 
             if (doctorResult.length === 0) {
-              return res.status(404).json({
-                success: false,
-                message: "Doctor not found",
-              });
+              return res.status(404).json({ success: false, message: "Doctor not found" });
             }
 
             const actualDoctorId = doctorResult[0].id;
@@ -1417,7 +1383,6 @@ const createAppointment = (req, res) => {
             );
           });
         } else {
-          // No doctor assigned
           insertAppointment(
             patientId,
             patientName,
@@ -1525,6 +1490,7 @@ const getAllAppointments = async (req, res) => {
             p.address
           FROM appointments a
           JOIN patients p ON a.patientId = p.id
+          ORDER BY a.appointmentDate DESC, a.startTime DESC, a.endTime DESC
         `;
 
         pool.query(query, (err, results) => {
@@ -1569,56 +1535,37 @@ const editAppointment = (req, res) => {
   } = req.body;
 
   if (!appointmentId) {
-    return res.status(400).json({
-      success: false,
-      message: "Appointment ID is required",
-    });
+    return res.status(400).json({ success: false, message: "Appointment ID is required" });
   }
 
   const parseTime = (t) => new Date(`1970-01-01T${t}`);
-  const noon = parseTime("12:00:00");
-  const midnight = parseTime("23:59:59");
 
-  // Get existing appointment details
   const getAppointmentQuery = `SELECT * FROM appointments WHERE id = ?`;
   pool.query(getAppointmentQuery, [appointmentId], (err, result) => {
     if (err) {
-      return res.status(500).json({
-        success: false,
-        message: "Error fetching appointment",
-        error: err.message,
-      });
+      return res.status(500).json({ success: false, message: "Error fetching appointment", error: err.message });
     }
 
     if (result.length === 0) {
-      return res.status(404).json({
-        success: false,
-        message: "Appointment not found",
-      });
+      return res.status(404).json({ success: false, message: "Appointment not found" });
     }
 
     const appointment = result[0];
 
-    // Fallback to old values if new ones not provided
     const appointmentDate = newDate || appointment.appointmentDate;
     const startTime = newStart || appointment.startTime;
     const endTime = newEnd || appointment.endTime;
     const reason = newReason !== undefined ? newReason : appointment.reason;
 
-    // Time validation
     const start = parseTime(startTime);
     const end = parseTime(endTime);
 
-    if (start < noon || end > midnight || start >= end) {
-      return res.status(400).json({
-        success: false,
-        message: "Time must be between 12:00 PM and 12:00 AM, and startTime < endTime",
-      });
+    if (start >= end) {
+      return res.status(400).json({ success: false, message: "startTime must be before endTime" });
     }
 
     const { patientId, doctorId } = appointment;
 
-    // Check for overlaps (exclude current appointment)
     const overlapQuery = `
       SELECT * FROM appointments 
       WHERE appointmentDate = ?
@@ -1626,10 +1573,9 @@ const editAppointment = (req, res) => {
       AND (
         (patientId = ? OR doctorId = ?)
         AND (
-          (? BETWEEN startTime AND endTime)
-          OR (? BETWEEN startTime AND endTime)
-          OR (startTime BETWEEN ? AND ?)
-          OR (endTime BETWEEN ? AND ?)
+          (startTime < ? AND endTime > ?)
+          OR (startTime < ? AND endTime > ?)
+          OR (? <= startTime AND ? >= endTime)
         )
       )
     `;
@@ -1641,30 +1587,19 @@ const editAppointment = (req, res) => {
         appointmentId,
         patientId,
         doctorId || 0,
-        startTime,
-        endTime,
-        startTime,
-        endTime,
-        startTime,
-        endTime,
+        startTime, startTime,
+        endTime, endTime,
+        startTime, endTime,
       ],
       (overlapErr, overlapResults) => {
         if (overlapErr) {
-          return res.status(500).json({
-            success: false,
-            message: "Error checking overlaps",
-            error: overlapErr.message,
-          });
+          return res.status(500).json({ success: false, message: "Error checking overlaps", error: overlapErr.message });
         }
 
         if (overlapResults.length > 0) {
-          return res.status(409).json({
-            success: false,
-            message: "Appointment overlaps with another for patient or doctor",
-          });
+          return res.status(409).json({ success: false, message: "Appointment overlaps with another for patient or doctor" });
         }
 
-        // Update the appointment
         const updateQuery = `
           UPDATE appointments SET
             appointmentDate = ?,
@@ -1674,24 +1609,105 @@ const editAppointment = (req, res) => {
           WHERE id = ?
         `;
 
-        pool.query(
-          updateQuery,
-          [appointmentDate, startTime, endTime, reason, appointmentId],
-          (updateErr) => {
-            if (updateErr) {
-              return res.status(500).json({
-                success: false,
-                message: "Error updating appointment",
-                error: updateErr.message,
-              });
-            }
-
-            return res.status(200).json({
-              success: true,
-              message: "Appointment updated successfully",
-            });
+        pool.query(updateQuery, [appointmentDate, startTime, endTime, reason, appointmentId], (updateErr) => {
+          if (updateErr) {
+            return res.status(500).json({ success: false, message: "Error updating appointment", error: updateErr.message });
           }
-        );
+
+          return res.status(200).json({ success: true, message: "Appointment updated successfully" });
+        });
+      }
+    );
+  });
+};
+
+const editAppointmentByPatientId = (req, res) => {
+  const { appointmentId, patientId } = req.params;
+  const {
+    appointmentDate: newDate,
+    startTime: newStart,
+    endTime: newEnd,
+    reason: newReason,
+  } = req.body;
+
+  if (!appointmentId || !patientId) {
+    return res.status(400).json({ success: false, message: "Appointment ID and Patient ID are required" });
+  }
+
+  const parseTime = (t) => new Date(`1970-01-01T${t}`);
+
+  const getQuery = `SELECT * FROM appointments WHERE id = ? AND patientId = ?`;
+
+  pool.query(getQuery, [appointmentId, patientId], (err, result) => {
+    if (err) {
+      return res.status(500).json({ success: false, message: "Error fetching appointment", error: err.message });
+    }
+
+    if (result.length === 0) {
+      return res.status(404).json({ success: false, message: "Appointment not found for given patient and appointment ID" });
+    }
+
+    const appointment = result[0];
+
+    const appointmentDate = newDate || appointment.appointmentDate;
+    const startTime = newStart || appointment.startTime;
+    const endTime = newEnd || appointment.endTime;
+    const reason = newReason !== undefined ? newReason : appointment.reason;
+
+    const start = parseTime(startTime);
+    const end = parseTime(endTime);
+
+    if (start >= end) {
+      return res.status(400).json({ success: false, message: "startTime must be before endTime" });
+    }
+
+    const doctorId = appointment.doctorId;
+
+    const overlapQuery = `
+      SELECT * FROM appointments 
+      WHERE appointmentDate = ?
+        AND id != ?
+        AND (patientId = ? OR doctorId = ?)
+        AND (
+          (startTime < ? AND endTime > ?)
+          OR (startTime < ? AND endTime > ?)
+          OR (? <= startTime AND ? >= endTime)
+        )
+    `;
+
+    pool.query(
+      overlapQuery,
+      [
+        appointmentDate,
+        appointmentId,
+        patientId,
+        doctorId || 0,
+        startTime, startTime,
+        endTime, endTime,
+        startTime, endTime
+      ],
+      (overlapErr, overlapResults) => {
+        if (overlapErr) {
+          return res.status(500).json({ success: false, message: "Error checking overlaps", error: overlapErr.message });
+        }
+
+        if (overlapResults.length > 0) {
+          return res.status(409).json({ success: false, message: "Overlapping appointment exists for this patient or doctor" });
+        }
+
+        const updateQuery = `
+          UPDATE appointments
+          SET appointmentDate = ?, startTime = ?, endTime = ?, reason = ?
+          WHERE id = ? AND patientId = ?
+        `;
+
+        pool.query(updateQuery, [appointmentDate, startTime, endTime, reason, appointmentId, patientId], (updateErr) => {
+          if (updateErr) {
+            return res.status(500).json({ success: false, message: "Error updating appointment", error: updateErr.message });
+          }
+
+          return res.status(200).json({ success: true, message: "Appointment updated successfully" });
+        });
       }
     );
   });
@@ -1739,14 +1755,14 @@ const getConfirmedAppointments = async (req, res) => {
     const fetchAppointments = () => {
       return new Promise((resolve, reject) => {
         const query = `
-          SELECT 
-            a.*, 
-            p.firstName, p.middleName, p.lastName, p.gender, p.dateOfBirth, p.age,
-            p.mobileNumber, p.email, p.nationality, p.address,
-            p.profileImage, p.civilIdNumber, p.passportNumber
+         SELECT 
+          a.*, 
+          p.firstName, p.middleName, p.lastName, p.gender, p.dateOfBirth, p.age,
+          p.mobileNumber, p.email, p.nationality, p.address,
+          p.profileImage, p.civilIdNumber, p.passportNumber
           FROM appointments a
           JOIN patients p ON a.patientId = p.id
-          WHERE a.status = 'Confirmed' or a.status = 'Cancelled'
+          WHERE DATE(a.appointmentDate) = CURDATE();
         `;
 
         pool.query(query, (err, results) => {
@@ -1761,12 +1777,12 @@ const getConfirmedAppointments = async (req, res) => {
     if (!appointments || appointments.length === 0) {
       return res.status(404).json({
         success: false,
-        message: "No appointments with status 'Confirmed' found",
+        message: "No confirmed appointments found for today",
         data: [],
       });
     }
 
-    //  Add `duration` field in each appointment
+    // Add `duration` field in each appointment
     const enhancedAppointments = appointments.map((appt) => {
       let durationInMinutes = null;
 
@@ -1788,7 +1804,7 @@ const getConfirmedAppointments = async (req, res) => {
 
     return res.status(200).json({
       success: true,
-      message: "Confirmed appointments with patient data fetched successfully",
+      message: "Today's confirmed appointments with patient data fetched successfully",
       data: enhancedAppointments,
     });
   } catch (error) {
@@ -1803,19 +1819,18 @@ const getConfirmedAppointments = async (req, res) => {
 
 const deleteAppointments = async (req, res) => {
   try {
-    const { id, patientId } = req.params;
+    const { id } = req.params;
 
-    if (!id || !patientId) {
+    if (!id ) {
       return res.status(400).json({
         success: false,
-        message: "Appointment id and patient id are required",
+        message: "Appointment id is required",
       });
     }
 
-    const deleteQuery = `DELETE FROM appointments WHERE id = ? AND patientId = ?`;
+    const deleteQuery = `DELETE FROM appointments WHERE id = ?`;
 
-    pool.query(deleteQuery, [id, patientId], (err, result) => {
-      console.log(result);
+    pool.query(deleteQuery, [id], (err, result) => {
 
       if (err) {
         return res.status(500).json({
@@ -1826,7 +1841,7 @@ const deleteAppointments = async (req, res) => {
       } else if (result.affectedRows === 0) {
         return res.status(404).json({
           success: false,
-          message: "Appointment not found with provided id and patientId",
+          message: "Appointment not found with provided id ",
         });
       } else {
         return res.status(200).json({
@@ -2016,13 +2031,11 @@ const getAppointmentsByDate = async (req, res) => {
     };
 
     const appointments = await fetchAppointmentsByDate();
-
-    console.log(appointments);
     
 
     if (!appointments || appointments.length === 0) {
-      return res.status(404).json({
-        success: false,
+      return res.status(205).json({
+        success: true,
         message: `No appointments found for date ${date}`,
         data: [],
       });
@@ -2262,12 +2275,12 @@ const changeAppointmentStatus = async (req, res) => {
       });
     }
 
-    const validStatuses = ["No-show", "Completed", "Cancelled" ,"Not Confirmed"];
+    const validStatuses = ["No-show", "Completed", "Cancelled" ,"Confirmed"];
     if (!status || !validStatuses.includes(status)) {
       return res.status(400).json({
         success: false,
         message:
-          "Invalid or missing status. Allowed values: 'No-Show', 'Completed', 'Cancelled' , 'Not Confirmed' ",
+          "Invalid or missing status. Allowed values: 'No-Show', 'Completed', 'Cancelled' , 'Confirmed' ",
       });
     }
 
@@ -2447,17 +2460,16 @@ const fullName = `${firstName} ${middleName || ''} ${lastName}`.trim().replace(/
         // Step 4: Insert into DB
         const insertQuery = `
           INSERT INTO patient_vitals (
-            patient_id, patient_name, doctor_id, doctor_name, age, gender, recorded_at, blood_pressure, 
+            patient_id, patient_name, doctor_id, age, gender, recorded_at, blood_pressure, 
             respiratory_rate, pulse, spo2, rbs_mg, rbs_nmol, bp_position, temperature, weight, height, bmi,
             risk_of_fall, urgency, notes
-          ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+          ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
         `;
 
         const values = [
           patient_id,
           fullName,
           doctor_id || null,
-          doctorName,
           age,
           gender,
           recorded_at,
@@ -2516,7 +2528,7 @@ const getPatientVitalsByPatientId = async (req, res) => {
 
     const query = `
       SELECT 
-        id, patient_id, patient_name, doctor_id, doctor_name, age, gender, 
+        id, patient_id, patient_name, doctor_id, age, gender, 
         recorded_at, blood_pressure, respiratory_rate, pulse, spo2, rbs_mg, 
         rbs_nmol, bp_position, temperature, weight, height, bmi, 
         risk_of_fall, urgency, notes 
@@ -4185,6 +4197,412 @@ const changeLabStatus = async (req, res) => {
   }
 };
 
+const addLabRequest = async (req, res) => {
+  try {
+    const {
+      patient_id,
+      lab_id,
+      doctor_id,
+      title,
+      description,
+      sent_by,
+    } = req.body;
+
+    if (!patient_id || !lab_id || !doctor_id || !title || !sent_by) {
+      return res.status(400).json({
+        success: false,
+        message: "Missing required fields.",
+      });
+    }
+
+    // Insert into lab_requests (created_at is auto-handled by DB)
+    const insertRequestQuery = `
+        INSERT INTO lab_requests 
+  (patient_id, lab_id, doctor_id, title, description, sent_by, status_updated_at)
+VALUES (?, ?, ?, ?, ?, ?, NOW())
+
+    `;
+
+    pool.query(
+      insertRequestQuery,
+      [patient_id, lab_id, doctor_id, title, description, sent_by],
+      async (err, result) => {
+        if (err) {
+          return res.status(500).json({
+            success: false,
+            message: "Error inserting lab request",
+            error: err.message,
+          });
+        }
+
+        const labRequestId = result.insertId;
+        const files = req.files || [];
+
+        if (files.length > 0) {
+          const values = files.map(file => [labRequestId, file.filename]);
+          const insertAttachmentQuery = `
+            INSERT INTO lab_request_attachments (lab_request_id, filename)
+            VALUES ?
+          `;
+
+          pool.query(insertAttachmentQuery, [values], (attachErr) => {
+            if (attachErr) {
+              return res.status(500).json({
+                success: false,
+                message: "Lab request created but attachments failed",
+                error: attachErr.message,
+              });
+            }
+
+            return sendFinalResponse(res, labRequestId);
+          });
+        } else {
+          return sendFinalResponse(res, labRequestId);
+        }
+      }
+    );
+  } catch (error) {
+    return res.status(500).json({
+      success: false,
+      message: "Internal Server Error",
+      error: error.message,
+    });
+  }
+};
+
+//  Helper to send response using created_at for date/time
+const sendFinalResponse = (res, labRequestId) => {
+  const query = `
+    SELECT
+      lr.id AS request_id,
+      lr.title,
+      lr.description,
+      DATE(lr.created_at) AS request_date,
+      TIME(lr.created_at) AS request_time,
+      DATEDIFF(CURDATE(), lr.created_at) AS days_since_request,
+      CONCAT_WS(' ', p.firstName, NULLIF(p.middleName, ''), p.lastName) AS patient_name,
+      p.civilIdNumber AS patient_civil_id,
+      d.fullName AS doctor_name,
+      l.lab_name,
+      lr.sent_by,
+      lr.status_updated_at,
+      lr.status,
+      (
+        SELECT GROUP_CONCAT(filename)
+        FROM lab_request_attachments
+        WHERE lab_request_id = lr.id
+      ) AS attachments
+    FROM lab_requests lr
+    JOIN patients p ON lr.patient_id = p.id
+    JOIN doctors d ON lr.doctor_id = d.id
+    JOIN labs l ON lr.lab_id = l.id
+    WHERE lr.id = ?
+  `;
+
+  pool.query(query, [labRequestId], (fetchErr, data) => {
+    if (fetchErr) {
+      return res.status(500).json({
+        success: false,
+        message: "Lab request created but response failed",
+        error: fetchErr.message,
+      });
+    }
+
+    return res.status(201).json({
+      success: true,
+      message: "Lab request created successfully",
+      data: {
+        ...data[0],
+        attachments: data[0].attachments
+          ? data[0].attachments.split(',')
+          : [],
+      },
+    });
+  });
+};
+
+const getLabRequestsByPatient = async (req, res) => {
+  const { patientId } = req.params;
+
+  if (!patientId) {
+    return res.status(400).json({
+      success: false,
+      message: "Patient ID is required",
+    });
+  }
+
+  const query = `
+    SELECT
+      lr.id AS request_id,
+      lr.title,
+      lr.description,
+      DATE(lr.created_at) AS request_date,
+      TIME(lr.created_at) AS request_time,
+      DATEDIFF(CURDATE(), lr.created_at) AS days_since_request,
+      DATE(lr.status_updated_at) AS status_change_date,
+      TIME(lr.status_updated_at) AS status_change_time,
+      DATEDIFF(CURDATE(), lr.status_updated_at) AS days_since_status_change,
+      CONCAT_WS(' ', p.firstName, NULLIF(p.middleName, ''), p.lastName) AS patient_name,
+      p.civilIdNumber AS patient_civil_id,
+      d.id AS doctor_id,
+      d.fullName AS doctor_name,
+      l.lab_name,
+      lr.sent_by,
+      lr.status,
+      (
+        SELECT GROUP_CONCAT(filename)
+        FROM lab_request_attachments
+        WHERE lab_request_id = lr.id
+      ) AS attachments
+    FROM lab_requests lr
+    JOIN patients p ON lr.patient_id = p.id
+    JOIN doctors d ON lr.doctor_id = d.id
+    JOIN labs l ON lr.lab_id = l.id
+    WHERE lr.patient_id = ?
+    ORDER BY lr.created_at DESC
+  `;
+
+  pool.query(query, [patientId], (err, result) => {
+    if (err) {
+      return res.status(500).json({
+        success: false,
+        message: "Error fetching lab requests",
+        error: err.message,
+      });
+    }
+
+    const data = result.map((row) => ({
+      ...row,
+      attachments: row.attachments ? row.attachments.split(',') : [],
+    }));
+
+    return res.status(200).json({
+      success: true,
+      message: "Lab requests fetched successfully",
+      data,
+    });
+  });
+};
+
+const updateLabRequestStatus = (req, res) => {
+  const { requestId } = req.params;
+  const { status } = req.body;
+
+  const allowedStatuses = ["Pending", "Received", "Result"];
+
+  if (!requestId || !status) {
+    return res.status(400).json({
+      success: false,
+      message: "Request ID and status are required",
+    });
+  }
+
+  if (!allowedStatuses.includes(status)) {
+    return res.status(400).json({
+      success: false,
+      message: `Invalid status. Allowed values: ${allowedStatuses.join(", ")}`,
+    });
+  }
+
+  const updateQuery = `
+    UPDATE lab_requests
+    SET status = ?, status_updated_at = NOW()
+    WHERE id = ?
+  `;
+
+  pool.query(updateQuery, [status, requestId], (err, result) => {
+    if (err) {
+      return res.status(500).json({
+        success: false,
+        message: "Failed to update status",
+        error: err.message,
+      });
+    }
+
+    if (result.affectedRows === 0) {
+      return res.status(404).json({
+        success: false,
+        message: "No lab request found with the provided ID",
+      });
+    }
+
+    return res.status(200).json({
+      success: true,
+      message: "Lab request status updated successfully",
+    });
+  });
+};
+
+const getLabRequestsByStatus = (req, res) => {
+  const { status } = req.body;
+  console.log("Requested Status:", status);
+
+  const allowedStatuses = ["Not Sent", "Pending", "Received", "Result"];
+
+  if (!allowedStatuses.includes(status)) {
+    return res.status(400).json({
+      success: false,
+      message: `Invalid status. Allowed values: ${allowedStatuses.join(", ")}`,
+    });
+  }
+
+  const query = `
+    SELECT
+      lr.id AS request_id,
+      lr.title,
+      lr.description,
+      DATE(lr.created_at) AS request_date,
+      TIME(lr.created_at) AS request_time,
+      DATEDIFF(CURDATE(), lr.status_updated_at) AS days_since_request,
+      CONCAT_WS(' ', p.firstName, NULLIF(p.middleName, ''), p.lastName) AS patient_name,
+      p.civilIdNumber AS patient_civil_id,
+      d.fullName AS doctor_name,
+      l.lab_name,
+      lr.sent_by,
+      lr.status
+    FROM lab_requests lr
+    JOIN patients p ON lr.patient_id = p.id
+    JOIN doctors d ON lr.doctor_id = d.id
+    JOIN labs l ON lr.lab_id = l.id
+    WHERE LOWER(lr.status) = LOWER(?)
+    ORDER BY lr.created_at DESC
+  `;
+
+  pool.query(query, [status], (err, results) => {
+    if (err) {
+      console.error("SQL Error:", err);
+      return res.status(500).json({
+        success: false,
+        message: "Failed to retrieve lab requests",
+        error: err.message,
+      });
+    }
+
+    if (!results || results.length === 0) {
+      return res.status(200).json({
+        success: true,
+        message: `No lab requests found with status '${status}'`,
+        data: [],
+      });
+    }
+
+    return res.status(200).json({
+      success: true,
+      message: `Lab requests with status '${status}' retrieved successfully`,
+      data: results,
+    });
+  });
+};
+
+const deleteLabRequest = (req, res) => {
+  const { id } = req.params;
+
+  if (!id) {
+    return res.status(400).json({
+      success: false,
+      message: "Lab request ID is required",
+    });
+  }
+
+  const checkQuery = `SELECT * FROM lab_requests WHERE id = ?`;
+  const deleteQuery = `DELETE FROM lab_requests WHERE id = ?`;
+
+  // Step 1: Check if the lab request exists
+  pool.query(checkQuery, [id], (checkErr, checkResult) => {
+    if (checkErr) {
+      return res.status(500).json({
+        success: false,
+        message: "Error checking lab request",
+        error: checkErr.message,
+      });
+    }
+
+    if (checkResult.length === 0) {
+      return res.status(404).json({
+        success: false,
+        message: `No lab request found with ID ${id}`,
+      });
+    }
+
+    // Step 2: Delete it
+    pool.query(deleteQuery, [id], (deleteErr, deleteResult) => {
+      if (deleteErr) {
+        return res.status(500).json({
+          success: false,
+          message: "Failed to delete lab request",
+          error: deleteErr.message,
+        });
+      }
+
+      return res.status(200).json({
+        success: true,
+        message: `Lab request with ID ${id} deleted successfully`,
+      });
+    });
+  });
+};
+
+const editLabRequest = (req, res) => {
+  const { id } = req.params;
+  const { lab_id, title, description } = req.body;
+
+  if (!id) {
+    return res.status(400).json({
+      success: false,
+      message: "Lab request ID is required",
+    });
+  }
+
+  // Step 1: Get current data from DB
+  const getQuery = `SELECT * FROM lab_requests WHERE id = ?`;
+
+  pool.query(getQuery, [id], (getErr, getResult) => {
+    if (getErr) {
+      return res.status(500).json({
+        success: false,
+        message: "Error fetching existing lab request",
+        error: getErr.message,
+      });
+    }
+
+    if (getResult.length === 0) {
+      return res.status(404).json({
+        success: false,
+        message: `Lab request with ID ${id} not found`,
+      });
+    }
+
+    const existing = getResult[0];
+
+    // Step 2: Use provided values if given, otherwise use existing ones
+    const updatedLabId = lab_id ?? existing.lab_id;
+    const updatedTitle = title ?? existing.title;
+    const updatedDescription = description ?? existing.description;
+
+    // Step 3: Update the row
+    const updateQuery = `
+      UPDATE lab_requests
+      SET lab_id = ?, title = ?, description = ?
+      WHERE id = ?
+    `;
+
+    pool.query(updateQuery, [updatedLabId, updatedTitle, updatedDescription, id], (updateErr, updateResult) => {
+      if (updateErr) {
+        return res.status(500).json({
+          success: false,
+          message: "Failed to update lab request",
+          error: updateErr.message,
+        });
+      }
+
+      return res.status(200).json({
+        success: true,
+        message: `Lab request with ID ${id} updated successfully`,
+      });
+    });
+  });
+};
+
 export default {
   getAllUsers,
   changeUserStatus,
@@ -4198,6 +4616,7 @@ export default {
   registerPatient,
   getAllPatients,
   editAppointment,
+  editAppointmentByPatientId,
   getPatientById,
   updatePatient,
   AddPatientServices,
@@ -4244,6 +4663,12 @@ export default {
   getLabById,
   updateLabById,
   deleteLabById,
-  changeLabStatus
+  changeLabStatus,
+  addLabRequest ,
+  getLabRequestsByPatient,
+  updateLabRequestStatus,
+  getLabRequestsByStatus,
+  deleteLabRequest,
+  editLabRequest
 };
 
