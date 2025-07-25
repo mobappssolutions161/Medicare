@@ -1473,53 +1473,186 @@ const insertAppointment = (
 
 const getAllAppointments = async (req, res) => {
   try {
-    const fetchAppointments = () => {
-      return new Promise((resolve, reject) => {
+    const fetchAppointments = () =>
+      new Promise((resolve, reject) => {
         const query = `
-          SELECT 
-            a.*, 
-            p.id AS patientId,
-            p.fileNumber,
-            p.firstName,
-            p.middleName,
-            p.lastName,
-            p.gender,
-            p.dateOfBirth,
-            p.mobileNumber,
-            p.email,
-            p.address
-          FROM appointments a
-          JOIN patients p ON a.patientId = p.id
-          ORDER BY a.appointmentDate DESC, a.startTime DESC, a.endTime DESC
-        `;
+  SELECT 
+    a.id,
+    a.patientId,
+    a.patientName,
+    a.doctorId,
+    a.doctorName,
+    DATE_FORMAT(a.appointmentDate, '%Y-%m-%d %H:%i:%s') AS appointmentDate,
+    DATE_FORMAT(a.startTime, '%H:%i:%s') AS startTime,
+    DATE_FORMAT(a.endTime,   '%H:%i:%s') AS endTime,
+    a.reason,
+    a.status,
+    DATE_FORMAT(a.createdAt, '%Y-%m-%d %H:%i:%s') AS createdAt,
+    DATE_FORMAT(a.updatedAt, '%Y-%m-%d %H:%i:%s') AS updatedAt,
+
+    p.id AS patientIdFromPatients,
+    p.fileNumber,
+    p.firstName,
+    p.middleName,
+    p.lastName,
+    p.gender,
+    DATE_FORMAT(p.dateOfBirth, '%Y-%m-%d') AS dateOfBirth,
+    p.mobileNumber,
+    p.email,
+    p.address
+  FROM appointments a
+  JOIN patients p ON a.patientId = p.id
+  ORDER BY 
+    DATE(a.appointmentDate) DESC,
+    a.startTime DESC,
+    a.endTime DESC,
+    a.appointmentDate DESC
+`;
 
         pool.query(query, (err, results) => {
           if (err) return reject(err);
           resolve(results);
         });
       });
-    };
 
     const appointments = await fetchAppointments();
 
     if (!appointments || appointments.length === 0) {
-      return res.status(404).json({
-        success: false,
+      return res.status(200).json({
+        success: true,
         message: "No appointments found",
         data: [],
       });
     }
 
+    // Duration calculation
+    const enhanced = appointments.map((appt) => {
+      let duration = null;
+      if (appt.startTime && appt.endTime) {
+        const [sh, sm] = appt.startTime.split(":").map(Number);
+        const [eh, em] = appt.endTime.split(":").map(Number);
+        duration = (eh * 60 + em) - (sh * 60 + sm);
+      }
+      return {
+        ...appt,
+        duration: duration != null ? `${duration} min` : null,
+      };
+    });
+
     return res.status(200).json({
       success: true,
-      message: "Appointments with patient info fetched successfully",
-      data: appointments,
+      message: "All appointments ordered by date and time (DESC)",
+      data: enhanced,
     });
   } catch (error) {
     console.error("Error fetching appointments:", error);
     return res.status(500).json({
       success: false,
       message: "An error occurred while retrieving appointments",
+      error: error.message,
+    });
+  }
+};
+
+const getUpcomingAppointment = async (req, res) => {
+  try {
+    const query = `
+      SELECT 
+        a.id,
+        a.patientId,
+        a.patientName,
+        a.doctorId,
+        a.doctorName,
+        DATE_FORMAT(a.appointmentDate, '%Y-%m-%d %H:%i:%s') AS appointmentDate,
+        DATE_FORMAT(a.startTime, '%H:%i:%s') AS startTime,
+        DATE_FORMAT(a.endTime, '%H:%i:%s') AS endTime,
+        a.reason,
+        a.status,
+        DATE_FORMAT(a.createdAt, '%Y-%m-%d %H:%i:%s') AS createdAt,
+        DATE_FORMAT(a.updatedAt, '%Y-%m-%d %H:%i:%s') AS updatedAt,
+
+        p.id AS patientIdFromPatients,
+        p.fileNumber,
+        p.firstName,
+        p.middleName,
+        p.lastName,
+        p.gender,
+        DATE_FORMAT(p.dateOfBirth, '%Y-%m-%d') AS dateOfBirth,
+        p.mobileNumber,
+        p.email,
+        p.address,
+
+        DATE_FORMAT(
+          TIMESTAMP(DATE(a.appointmentDate), a.startTime),
+          '%Y-%m-%d %H:%i:%s'
+        ) AS scheduledStart,
+        DATE_FORMAT(
+          TIMESTAMP(DATE(a.appointmentDate), a.endTime),
+          '%Y-%m-%d %H:%i:%s'
+        ) AS scheduledEnd,
+
+        TIMESTAMPDIFF(
+          MINUTE,
+          NOW(),
+          TIMESTAMP(DATE(a.appointmentDate), a.startTime)
+        ) AS startsInMinutes
+      FROM appointments a
+      JOIN patients p ON a.patientId = p.id
+      WHERE 
+        TIMESTAMP(DATE(a.appointmentDate), a.startTime) > NOW()
+        AND a.status = 'Confirmed'
+      ORDER BY TIMESTAMP(DATE(a.appointmentDate), a.startTime) ASC
+      LIMIT 1
+    `;
+
+    const rows = await new Promise((resolve, reject) => {
+      pool.query(query, (err, results) => {
+        if (err) return reject(err);
+        resolve(results);
+      });
+    });
+
+    if (!rows || rows.length === 0) {
+      return res.status(404).json({
+        success: false,
+        message: "No upcoming confirmed appointments found",
+      });
+    }
+
+    const appt = rows[0];
+
+    // Duration calculation
+    if (appt.startTime && appt.endTime) {
+      const [sh, sm] = appt.startTime.split(":").map(Number);
+      const [eh, em] = appt.endTime.split(":").map(Number);
+      appt.duration = `${(eh * 60 + em) - (sh * 60 + sm)} min`;
+    } else {
+      appt.duration = null;
+    }
+
+    // Human-friendly "starts in" message
+    appt.startsInHuman = toHuman(appt.startsInMinutes);
+
+    return res.status(200).json({
+      success: true,
+      message: "Upcoming confirmed appointment fetched successfully",
+      data: appt,
+    });
+
+    function toHuman(minutes) {
+      if (minutes == null) return null;
+      if (minutes < 0) return "already started/finished";
+      const h = Math.floor(minutes / 60);
+      const m = minutes % 60;
+      if (h && m) return `${h}h ${m}m`;
+      if (h) return `${h}h`;
+      return `${m}m`;
+    }
+  } catch (error) {
+    console.error("Error fetching upcoming appointment:", error);
+    return res.status(500).json({
+      success: false,
+      message: "An error occurred while fetching upcoming appointment",
       error: error.message,
     });
   }
@@ -1755,15 +1888,17 @@ const getConfirmedAppointments = async (req, res) => {
     const fetchAppointments = () => {
       return new Promise((resolve, reject) => {
         const query = `
-         SELECT 
-          a.*, 
-          p.firstName, p.middleName, p.lastName, p.gender, p.dateOfBirth, p.age,
-          p.mobileNumber, p.email, p.nationality, p.address,
-          p.profileImage, p.civilIdNumber, p.passportNumber
-          FROM appointments a
-          JOIN patients p ON a.patientId = p.id
-          WHERE DATE(a.appointmentDate) = CURDATE();
-        `;
+  SELECT 
+    a.*, 
+    p.firstName, p.middleName, p.lastName, p.gender, p.dateOfBirth, p.age,
+    p.mobileNumber, p.email, p.nationality, p.address,
+    p.profileImage, p.civilIdNumber, p.passportNumber
+  FROM appointments a
+  JOIN patients p ON a.patientId = p.id
+  WHERE (a.status = "Confirmed" OR a.status = "Cancelled" OR a.status = "Booked")
+    AND DATE(a.appointmentDate) = CURDATE();
+`;
+
 
         pool.query(query, (err, results) => {
           if (err) return reject(err);
@@ -2000,71 +2135,75 @@ const doctorAvailability = async (req, res) => {
 
 const getAppointmentsByDate = async (req, res) => {
   try {
-    const { date } = req.query;
-    console.log(date);
-    
-    if (!date) {
+    const { dates } = req.body; // ["2025-07-24","2025-07-07"]
+
+    if (!Array.isArray(dates) || dates.length === 0) {
       return res.status(400).json({
         success: false,
-        message: "Date is required in query (format: YYYY-MM-DD)",
+        message: "dates must be a non-empty array of YYYY-MM-DD strings",
       });
     }
 
-    const fetchAppointmentsByDate = () => {
-      return new Promise((resolve, reject) => {
-        const query = `
-  SELECT 
-    a.*, 
-    p.firstName, p.middleName, p.lastName, p.gender, p.dateOfBirth, p.age,
-    p.mobileNumber, p.email, p.nationality, p.address,
-    p.profileImage, p.civilIdNumber, p.passportNumber
-  FROM appointments a
-  JOIN patients p ON a.patientId = p.id
-  WHERE DATE(a.appointmentDate) = ?
-`;
+    const isoDateRegex = /^\d{4}-\d{2}-\d{2}$/;
+    const uniqDates = [...new Set(dates.map(d => (d || '').trim()))];
 
-        pool.query(query, [date], (err, results) => {
-          if (err) return reject(err);
-          resolve(results);
-        });
-      });
-    };
-
-    const appointments = await fetchAppointmentsByDate();
-    
-
-    if (!appointments || appointments.length === 0) {
-      return res.status(205).json({
-        success: true,
-        message: `No appointments found for date ${date}`,
-        data: [],
+    if (!uniqDates.every(d => isoDateRegex.test(d))) {
+      return res.status(400).json({
+        success: false,
+        message: "All dates must be in YYYY-MM-DD format",
       });
     }
 
-    // Add duration between start and end time
-    const enhancedAppointments = appointments.map((appt) => {
-      let durationInMinutes = null;
-      if (appt.startTime && appt.endTime) {
-        const start = new Date(`1970-01-01T${appt.startTime}`);
-        const end = new Date(`1970-01-01T${appt.endTime}`);
-        if (!isNaN(start) && !isNaN(end)) {
-          const diffMs = end - start;
-          durationInMinutes = Math.floor(diffMs / 60000);
-        }
-      }
-      return {
-        ...appt,
-        duration: durationInMinutes !== null ? `${durationInMinutes} min` : null,
-      };
+    const placeholders = uniqDates.map(() => "?").join(",");
+
+    const query = `
+      SELECT 
+        a.id, 
+        a.patientId, 
+        a.doctorId, 
+        a.status, 
+        a.reason,
+        DATE_FORMAT(a.appointmentDate, '%Y-%m-%d %H:%i:%s') AS appointmentDate,
+        DATE_FORMAT(a.startTime, '%H:%i:%s') AS startTime,
+        DATE_FORMAT(a.endTime, '%H:%i:%s') AS endTime,
+        DATE_FORMAT(a.createdAt, '%Y-%m-%d %H:%i:%s') AS createdAt,
+        DATE_FORMAT(a.updatedAt, '%Y-%m-%d %H:%i:%s') AS updatedAt,
+
+        -- Patient full name
+        TRIM(CONCAT(
+          p.firstName, 
+          IF(p.middleName IS NULL OR p.middleName = '', '', CONCAT(' ', p.middleName)),
+          IF(p.lastName   IS NULL OR p.lastName   = '', '', CONCAT(' ', p.lastName))
+        )) AS patientName,
+
+        -- Doctor full name directly
+        d.fullName AS doctorName,
+
+        p.firstName, p.middleName, p.lastName, p.gender, 
+        DATE_FORMAT(p.dateOfBirth, '%Y-%m-%d') AS dateOfBirth,
+        p.age, p.mobileNumber, p.email, p.nationality, p.address,
+        p.profileImage, p.civilIdNumber, p.passportNumber
+      FROM appointments a
+      JOIN patients p ON a.patientId = p.id
+      LEFT JOIN doctors d ON a.doctorId = d.id
+      WHERE DATE(a.appointmentDate) IN (${placeholders})
+      ORDER BY a.appointmentDate ASC, a.startTime ASC, a.endTime ASC
+    `;
+
+    const appointments = await new Promise((resolve, reject) => {
+      pool.query(query, uniqDates, (err, results) => {
+        if (err) return reject(err);
+        resolve(results);
+      });
     });
 
     return res.status(200).json({
       success: true,
-      message: `Appointments for ${date} fetched successfully`,
-      data: enhancedAppointments,
+      message: `Appointments for [${uniqDates.join(", ")}] fetched successfully`,
+      data: appointments,
     });
   } catch (error) {
-    console.error("Error fetching appointments by date:", error);
+    console.error("Error fetching appointments by dates:", error);
     return res.status(500).json({
       success: false,
       message: "An error occurred while retrieving appointments",
@@ -4215,18 +4354,16 @@ const addLabRequest = async (req, res) => {
       });
     }
 
-    // Insert into lab_requests (created_at is auto-handled by DB)
     const insertRequestQuery = `
-        INSERT INTO lab_requests 
-  (patient_id, lab_id, doctor_id, title, description, sent_by, status_updated_at)
-VALUES (?, ?, ?, ?, ?, ?, NOW())
-
+      INSERT INTO lab_requests 
+        (patient_id, lab_id, doctor_id, title, description, sent_by, status_updated_at)
+      VALUES (?, ?, ?, ?, ?, ?, NOW())
     `;
 
     pool.query(
       insertRequestQuery,
       [patient_id, lab_id, doctor_id, title, description, sent_by],
-      async (err, result) => {
+      (err, result) => {
         if (err) {
           return res.status(500).json({
             success: false,
@@ -4236,29 +4373,7 @@ VALUES (?, ?, ?, ?, ?, ?, NOW())
         }
 
         const labRequestId = result.insertId;
-        const files = req.files || [];
-
-        if (files.length > 0) {
-          const values = files.map(file => [labRequestId, file.filename]);
-          const insertAttachmentQuery = `
-            INSERT INTO lab_request_attachments (lab_request_id, filename)
-            VALUES ?
-          `;
-
-          pool.query(insertAttachmentQuery, [values], (attachErr) => {
-            if (attachErr) {
-              return res.status(500).json({
-                success: false,
-                message: "Lab request created but attachments failed",
-                error: attachErr.message,
-              });
-            }
-
-            return sendFinalResponse(res, labRequestId);
-          });
-        } else {
-          return sendFinalResponse(res, labRequestId);
-        }
+        return sendFinalResponse(res, labRequestId);
       }
     );
   } catch (error) {
@@ -4286,12 +4401,7 @@ const sendFinalResponse = (res, labRequestId) => {
       l.lab_name,
       lr.sent_by,
       lr.status_updated_at,
-      lr.status,
-      (
-        SELECT GROUP_CONCAT(filename)
-        FROM lab_request_attachments
-        WHERE lab_request_id = lr.id
-      ) AS attachments
+      lr.status
     FROM lab_requests lr
     JOIN patients p ON lr.patient_id = p.id
     JOIN doctors d ON lr.doctor_id = d.id
@@ -4311,12 +4421,7 @@ const sendFinalResponse = (res, labRequestId) => {
     return res.status(201).json({
       success: true,
       message: "Lab request created successfully",
-      data: {
-        ...data[0],
-        attachments: data[0].attachments
-          ? data[0].attachments.split(',')
-          : [],
-      },
+      data: data[0],
     });
   });
 };
@@ -4388,7 +4493,7 @@ const updateLabRequestStatus = (req, res) => {
   const { requestId } = req.params;
   const { status } = req.body;
 
-  const allowedStatuses = ["Pending", "Received", "Result"];
+  const allowedStatuses = ["Pending", "Received", "Result","Cancelled"];
 
   if (!requestId || !status) {
     return res.status(400).json({
@@ -4603,6 +4708,80 @@ const editLabRequest = (req, res) => {
   });
 };
 
+const addLabRequestAttachment = async (req, res) => {
+  try {
+    const lab_request_id = parseInt(req.params.lab_request_id);
+    const { report_status, name } = req.body;
+    const file = req.file;
+
+    //  Validate lab_request_id
+    if (!lab_request_id || isNaN(lab_request_id)) {
+      return res.status(400).json({
+        success: false,
+        message: "Invalid or missing lab_request_id in URL params",
+      });
+    }
+
+    // 🔒 Validate report_status
+    if (!report_status || typeof report_status !== "string" || report_status.trim() === "") {
+      return res.status(400).json({
+        success: false,
+        message: "Report status is required and must be a non-empty string",
+      });
+    }
+
+    // 🔒 Validate name
+    if (!name || typeof name !== "string" || name.trim() === "") {
+      return res.status(400).json({
+        success: false,
+        message: "Name is required and must be a non-empty string",
+      });
+    }
+
+    // 🔒 Validate file
+    if (!file) {
+      return res.status(400).json({
+        success: false,
+        message: "A single file upload is required under 'file' field",
+      });
+    }
+
+    // ✅ Insert into DB
+    const insertQuery = `
+      INSERT INTO lab_request_attachments
+        (lab_request_id, filename, report_status, name, uploaded_at)
+      VALUES (?, ?, ?, ?, NOW())
+    `;
+
+    pool.query(
+      insertQuery,
+      [lab_request_id, file.filename, report_status, name],
+      (err, result) => {
+        if (err) {
+          return res.status(500).json({
+            success: false,
+            message: "Failed to insert attachment",
+            error: err.message,
+          });
+        }
+
+        return res.status(201).json({
+          success: true,
+          message: "Attachment uploaded successfully",
+          attachment_id: result.insertId,
+          uploaded_file: file.filename,
+        });
+      }
+    );
+  } catch (error) {
+    return res.status(500).json({
+      success: false,
+      message: "Internal Server Error",
+      error: error.message,
+    });
+  }
+};
+
 export default {
   getAllUsers,
   changeUserStatus,
@@ -4624,6 +4803,7 @@ export default {
   deletePatient,
   createAppointment,
   getAllAppointments,
+  getUpcomingAppointment,
   getWaitingAppointments,
   getConfirmedAppointments,
   deleteAppointments,
@@ -4669,6 +4849,7 @@ export default {
   updateLabRequestStatus,
   getLabRequestsByStatus,
   deleteLabRequest,
-  editLabRequest
+  editLabRequest,
+  addLabRequestAttachment
 };
 
