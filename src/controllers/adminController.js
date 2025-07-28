@@ -31,12 +31,14 @@ function isValidSchedule(item) {
 
 const getAllUsers = async (req, res) => {
   try {
-    // const allUser = 'Select * from users where role != "admin" AND is_active = 1  and is_deleted = 0';
-    const allUser = `Select users.*, doctors.fullName, doctors.licenseId from users 
-    LEFT JOIN doctors on doctors.user_id= users.id
-    where users.role != "admin" and users.is_deleted = 0`;
+    const query = `
+      SELECT users.*, doctors.fullName, doctors.licenseId 
+      FROM users 
+      LEFT JOIN doctors ON doctors.user_id = users.id 
+      WHERE users.is_deleted = 0
+    `;
 
-    pool.query(allUser, (error, result) => {
+    pool.query(query, (error, result) => {
       if (error) {
         return res.status(400).json({
           success: false,
@@ -44,7 +46,8 @@ const getAllUsers = async (req, res) => {
           error_message: error.message,
         });
       }
-      if (result.length === 0) {
+
+      if (!result || result.length === 0) {
         return res.status(200).json({
           success: false,
           message: "No users found",
@@ -53,11 +56,11 @@ const getAllUsers = async (req, res) => {
 
       return res.status(200).json({
         success: true,
-        message: "Users fetched successfully",
+        message: "All users fetched successfully",
         data: result,
       });
     });
-  } catch (error) {
+  } catch (err) {
     return res.status(500).json({
       success: false,
       message: "Internal Server Error",
@@ -190,47 +193,98 @@ const deleteUserById = async (req, res) => {
   }
 };
 
+const getAllStaff = async (req, res) => {
+  try {
+    const query = `
+      SELECT users.*, doctors.fullName, doctors.licenseId 
+      FROM users 
+      LEFT JOIN doctors ON doctors.user_id = users.id 
+      WHERE users.role IN ("receptionist", "admin") AND users.is_deleted = 0
+    `;
+
+    pool.query(query, (error, result) => {
+      if (error) {
+        return res.status(400).json({
+          success: false,
+          message: "Error fetching staff",
+          error_message: error.message,
+        });
+      }
+
+      return res.status(200).json({
+        success: true,
+        message: "Staff fetched successfully",
+        data: result,
+      });
+    });
+  } catch (err) {
+    res.status(500).json({ success: false, message: "Server Error" });
+  }
+};
+
+const getAllNurses = async (req, res) => {
+  try {
+    const query = `
+      SELECT users.*, doctors.fullName, doctors.licenseId 
+      FROM users 
+      LEFT JOIN doctors ON doctors.user_id = users.id 
+      WHERE users.role = "nurse" AND users.is_deleted = 0
+    `;
+
+    pool.query(query, (error, result) => {
+      if (error) {
+        return res.status(400).json({
+          success: false,
+          message: "Error fetching nurses",
+          error_message: error.message,
+        });
+      }
+
+      return res.status(200).json({
+        success: true,
+        message: "Nurses fetched successfully",
+        data: result,
+      });
+    });
+  } catch (err) {
+    res.status(500).json({ success: false, message: "Server Error" });
+  }
+};
+
 const getAllDoctors = async (req, res) => {
   try {
-    const getDoctors = () => {
-      return new Promise((resolve, reject) => {
-        // Join doctors with users to get status and other user info
-        const query = `
-          SELECT 
-            doctors.*, 
-            users.is_active 
-          FROM doctors 
-          JOIN users ON doctors.user_id = users.id 
-          ORDER BY doctors.createdAt DESC
-        `;
-        pool.query(query, (err, results) => {
-          if (err) return reject(err);
-          resolve(results);
+    const doctorQuery = `
+      SELECT users.*, doctors.fullName, doctors.licenseId 
+      FROM users 
+      LEFT JOIN doctors ON doctors.user_id = users.id
+      WHERE users.role = "doctor" AND users.is_deleted = 0
+    `;
+
+    pool.query(doctorQuery, (error, result) => {
+      if (error) {
+        return res.status(400).json({
+          success: false,
+          message: "Database error while fetching doctors",
+          error_message: error.message,
         });
+      }
+      if (result.length === 0) {
+        return res.status(200).json({
+          success: false,
+          message: "No doctors found",
+        });
+      }
+
+      return res.status(200).json({
+        success: true,
+        message: "Doctors fetched successfully",
+        data: result,
       });
-    };
-
-    const doctors = await getDoctors();
-
-    if (!doctors || doctors.length === 0) {
-      return res.status(404).json({
-        success: false,
-        message: "No doctors found",
-        data: [],
-      });
-    }
-
-    return res.status(200).json({
-      success: true,
-      message: "Doctors retrieved successfully",
-      data: doctors,
     });
   } catch (error) {
-    console.error("Error fetching doctors:", error);
     return res.status(500).json({
       success: false,
       message: "Internal Server Error",
-      error: error.message,
     });
   }
 };
@@ -2692,10 +2746,40 @@ const getPatientVitalsByPatientId = async (req, res) => {
         });
       }
 
+      // Transform results: remove `blood_pressure`, add `systolic` and `diastolic`
+      const updatedVitals = results.map((vital) => {
+        const [systolic, diastolic] = (vital.blood_pressure || "0/0").split("/");
+
+        return {
+          id: vital.id,
+          patient_id: vital.patient_id,
+          patient_name: vital.patient_name,
+          doctor_id: vital.doctor_id,
+          age: vital.age,
+          gender: vital.gender,
+          recorded_at: vital.recorded_at,
+          blood_pressure_systolic: parseInt(systolic),
+          blood_pressure_diastolic: parseInt(diastolic),
+          respiratory_rate: vital.respiratory_rate,
+          pulse: vital.pulse,
+          spo2: vital.spo2,
+          rbs_mg: vital.rbs_mg,
+          rbs_nmol: vital.rbs_nmol,
+          bp_position: vital.bp_position,
+          temperature: vital.temperature,
+          weight: vital.weight,
+          height: vital.height,
+          bmi: vital.bmi,
+          risk_of_fall: vital.risk_of_fall,
+          urgency: vital.urgency,
+          notes: vital.notes,
+        };
+      });
+
       return res.status(200).json({
         success: true,
         message: "Patient vitals retrieved successfully",
-        vitals: results,
+        vitals: updatedVitals,
       });
     });
   } catch (error) {
@@ -2706,6 +2790,7 @@ const getPatientVitalsByPatientId = async (req, res) => {
     });
   }
 };
+
 
 const updatePatientVitals = async (req, res) => {
   try {
@@ -2718,7 +2803,7 @@ const updatePatientVitals = async (req, res) => {
       });
     }
 
-    // Step 1: Get existing vitals
+    // Step 1: Fetch existing vitals record
     const getQuery = `SELECT * FROM patient_vitals WHERE id = ?`;
     pool.query(getQuery, [vitalId], (getErr, getResults) => {
       if (getErr || getResults.length === 0) {
@@ -2731,72 +2816,83 @@ const updatePatientVitals = async (req, res) => {
 
       const existing = getResults[0];
 
-      // Step 2: Prepare updated data
-      const updatedFields = {
-        patient_id: req.body.patient_id || existing.patient_id,
-        nurse: req.body.nurse || existing.nurse,
-        recorded_at: req.body.recorded_at || existing.recorded_at,
-        blood_pressure_systolic:
-          req.body.blood_pressure_systolic || existing.blood_pressure_systolic,
-        blood_pressure_diastolic:
-          req.body.blood_pressure_diastolic ||
-          existing.blood_pressure_diastolic,
-        heart_rate: req.body.heart_rate || existing.heart_rate,
-        respiratory_rate:
-          req.body.respiratory_rate || existing.respiratory_rate,
-        temperature: req.body.temperature || existing.temperature,
-        weight: req.body.weight || existing.weight,
-        height: req.body.height || existing.height,
-        bmi: req.body.bmi || existing.bmi,
-        oxygen_saturation:
-          req.body.oxygen_saturation || existing.oxygen_saturation,
-        notes: req.body.notes || existing.notes,
+      // Step 2: Use provided values or fallback to existing
+      const blood_pressure_systolic = req.body.blood_pressure_systolic ?? existing.blood_pressure.split("/")[0];
+      const blood_pressure_diastolic = req.body.blood_pressure_diastolic ?? existing.blood_pressure.split("/")[1];
+      const blood_pressure = `${blood_pressure_systolic}/${blood_pressure_diastolic}`;
+
+      const weight = req.body.weight ?? existing.weight;
+      const height = req.body.height ?? existing.height;
+      const height_in_m = height / 100;
+      const bmi = (height_in_m > 0) ? (weight / (height_in_m * height_in_m)).toFixed(2) : existing.bmi;
+
+      const updatedValues = {
+        doctor_id: req.body.doctor_id ?? existing.doctor_id,
+        recorded_at: req.body.recorded_at ?? existing.recorded_at,
+        blood_pressure,
+        respiratory_rate: req.body.respiratory_rate ?? existing.respiratory_rate,
+        pulse: req.body.pulse ?? existing.pulse,
+        spo2: req.body.spo2 ?? existing.spo2,
+        rbs_mg: req.body.rbs_mg ?? existing.rbs_mg,
+        rbs_nmol: req.body.rbs_nmol ?? existing.rbs_nmol,
+        bp_position: req.body.bp_position ?? existing.bp_position,
+        temperature: req.body.temperature ?? existing.temperature,
+        weight,
+        height,
+        bmi,
+        risk_of_fall: req.body.risk_of_fall ?? existing.risk_of_fall,
+        urgency: req.body.urgency ?? existing.urgency,
+        notes: req.body.notes ?? existing.notes,
       };
 
-      // Step 3: Build and run update query
+      // Step 3: Update query
       const updateQuery = `
         UPDATE patient_vitals SET
-          patient_id = ?, nurse = ?, recorded_at = ?, blood_pressure_systolic = ?, blood_pressure_diastolic = ?,
-          heart_rate = ?, respiratory_rate = ?, temperature = ?, weight = ?, height = ?, bmi = ?, oxygen_saturation = ?, notes = ?
+          doctor_id = ?, recorded_at = ?, blood_pressure = ?, respiratory_rate = ?, pulse = ?, spo2 = ?,
+          rbs_mg = ?, rbs_nmol = ?, bp_position = ?, temperature = ?, weight = ?, height = ?, bmi = ?,
+          risk_of_fall = ?, urgency = ?, notes = ?
         WHERE id = ?
       `;
 
-      const updateValues = [
-        updatedFields.patient_id,
-        updatedFields.nurse,
-        updatedFields.recorded_at,
-        updatedFields.blood_pressure_systolic,
-        updatedFields.blood_pressure_diastolic,
-        updatedFields.heart_rate,
-        updatedFields.respiratory_rate,
-        updatedFields.temperature,
-        updatedFields.weight,
-        updatedFields.height,
-        updatedFields.bmi,
-        updatedFields.oxygen_saturation,
-        updatedFields.notes,
-        vitalId,
+      const updateParams = [
+        updatedValues.doctor_id,
+        updatedValues.recorded_at,
+        updatedValues.blood_pressure,
+        updatedValues.respiratory_rate,
+        updatedValues.pulse,
+        updatedValues.spo2,
+        updatedValues.rbs_mg,
+        updatedValues.rbs_nmol,
+        updatedValues.bp_position,
+        updatedValues.temperature,
+        updatedValues.weight,
+        updatedValues.height,
+        updatedValues.bmi,
+        updatedValues.risk_of_fall,
+        updatedValues.urgency,
+        updatedValues.notes,
+        vitalId
       ];
 
-      pool.query(updateQuery, updateValues, (updateErr) => {
+      pool.query(updateQuery, updateParams, (updateErr) => {
         if (updateErr) {
           return res.status(500).json({
             success: false,
-            message: "Error updating vitals",
+            message: "Error updating patient vitals",
             error: updateErr.message,
           });
         }
 
         return res.status(200).json({
           success: true,
-          message: "Vitals updated successfully",
+          message: "Patient vitals updated successfully",
         });
       });
     });
   } catch (error) {
     return res.status(500).json({
       success: false,
-      message: "Server error",
+      message: "Internal server error",
       error: error.message,
     });
   }
@@ -3458,11 +3554,12 @@ const addDrug = async (req, res) => {
     price,
     category,
     strength,
+    barcode // ✅ New field
   } = req.body;
 
   const image = req.file ? req.file.filename : null;
 
-  // Validate required fields
+  // ✅ Validate required fields
   if (
     !name ||
     !substance ||
@@ -3480,69 +3577,97 @@ const addDrug = async (req, res) => {
   }
 
   try {
-    // Step 1: Check for existing drug (by name, substance, company)
-    const checkQuery = `
-      SELECT * FROM drugs
-      WHERE name = ? AND substance = ? AND company = ?
-    `;
-    const checkValues = [name, substance, company];
-
-    pool.query(checkQuery, checkValues, (checkErr, checkResult) => {
-      if (checkErr) {
-        console.error("Error checking drug:", checkErr);
-        return res.status(500).json({
-          success: false,
-          message: "Database error while checking for existing drug",
-          error: checkErr.message,
-        });
-      }
-
-      if (checkResult.length > 0) {
-        return res.status(409).json({
-          success: false,
-          message: "Drug already exists with the same name, substance, and company.",
-        });
-      }
-
-      // Step 2: Insert if not duplicate
-      const insertQuery = `
-        INSERT INTO drugs (
-          name, substance, unit_of_measurement, company, quantity,
-          expiration_date, cost, price, category, strength, image
-        ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
-      `;
-
-      const values = [
-        name,
-        substance,
-        unit_of_measurement,
-        company,
-        quantity || null,
-        expiration_date,
-        cost,
-        price,
-        category || null,
-        strength || null,
-        image,
-      ];
-
-      pool.query(insertQuery, values, (err, result) => {
-        if (err) {
-          console.error("Error adding drug:", err);
+    // ✅ Check for duplicate barcode (optional, only if barcode must be unique)
+    if (barcode) {
+      const barcodeCheckQuery = `SELECT id FROM drugs WHERE barcode = ?`;
+      pool.query(barcodeCheckQuery, [barcode], (barcodeErr, barcodeResult) => {
+        if (barcodeErr) {
           return res.status(500).json({
             success: false,
-            message: "Failed to add drug",
-            error: err.message,
+            message: "Database error while checking barcode",
+            error: barcodeErr.message,
+          });
+        }
+        if (barcodeResult.length > 0) {
+          return res.status(409).json({
+            success: false,
+            message: "Drug with this barcode already exists.",
           });
         }
 
-        return res.status(201).json({
-          success: true,
-          message: "Drug added successfully",
-          drugId: result.insertId,
+        // Proceed if barcode is not duplicate
+        insertDrug();
+      });
+    } else {
+      insertDrug(); // If no barcode provided, just proceed
+    }
+
+    function insertDrug() {
+      // ✅ Step 1: Check for existing drug (by name, substance, company)
+      const checkQuery = `
+        SELECT * FROM drugs
+        WHERE name = ? AND substance = ? AND company = ?
+      `;
+      const checkValues = [name, substance, company];
+
+      pool.query(checkQuery, checkValues, (checkErr, checkResult) => {
+        if (checkErr) {
+          console.error("Error checking drug:", checkErr);
+          return res.status(500).json({
+            success: false,
+            message: "Database error while checking for existing drug",
+            error: checkErr.message,
+          });
+        }
+
+        if (checkResult.length > 0) {
+          return res.status(409).json({
+            success: false,
+            message: "Drug already exists with the same name, substance, and company.",
+          });
+        }
+
+        // ✅ Step 2: Insert the drug
+        const insertQuery = `
+          INSERT INTO drugs (
+            name, substance, unit_of_measurement, company, quantity,
+            expiration_date, cost, price, category, strength, image, barcode
+          ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+        `;
+
+        const values = [
+          name,
+          substance,
+          unit_of_measurement,
+          company,
+          quantity || null,
+          expiration_date,
+          cost,
+          price,
+          category || null,
+          strength || null,
+          image,
+          barcode || null, // ✅ Include barcode
+        ];
+
+        pool.query(insertQuery, values, (err, result) => {
+          if (err) {
+            console.error("Error adding drug:", err);
+            return res.status(500).json({
+              success: false,
+              message: "Failed to add drug",
+              error: err.message,
+            });
+          }
+
+          return res.status(201).json({
+            success: true,
+            message: "Drug added successfully",
+            drugId: result.insertId,
+          });
         });
       });
-    });
+    }
   } catch (err) {
     console.error("Unexpected error adding drug:", err);
     return res.status(500).json({
@@ -3645,7 +3770,6 @@ const updateDrug = async (req, res) => {
       });
     }
 
-    // Step 1: Fetch existing drug data
     const getQuery = `SELECT * FROM drugs WHERE id = ?`;
     pool.query(getQuery, [drugId], (getErr, getResults) => {
       if (getErr) {
@@ -3666,7 +3790,6 @@ const updateDrug = async (req, res) => {
       const existing = getResults[0];
       const image = req.file ? req.file.filename : existing.image;
 
-      // Step 2: Merge values (fallback to existing)
       const updatedFields = {
         name: req.body.name || existing.name,
         substance: req.body.substance || existing.substance,
@@ -3678,14 +3801,14 @@ const updateDrug = async (req, res) => {
         price: req.body.price !== undefined ? req.body.price : existing.price,
         category: req.body.category || existing.category,
         strength: req.body.strength || existing.strength,
-        image: image,
+        barcode: req.body.barcode || existing.barcode, // <-- new field
+        image,
       };
 
-      // Step 3: Run the update
       const updateQuery = `
         UPDATE drugs SET
           name = ?, substance = ?, unit_of_measurement = ?, company = ?, quantity = ?,
-          expiration_date = ?, cost = ?, price = ?, category = ?, strength = ?, image = ?
+          expiration_date = ?, cost = ?, price = ?, category = ?, strength = ?, image = ?, barcode = ?
         WHERE id = ?
       `;
 
@@ -3701,6 +3824,7 @@ const updateDrug = async (req, res) => {
         updatedFields.category,
         updatedFields.strength,
         updatedFields.image,
+        updatedFields.barcode,
         drugId,
       ];
 
@@ -4599,6 +4723,62 @@ const getLabRequestsByStatus = (req, res) => {
   });
 };
 
+const getLabRequestById = (req, res) => {
+  const { id } = req.params;
+
+  if (!id || isNaN(id)) {
+    return res.status(400).json({
+      success: false,
+      message: "Invalid or missing lab request ID",
+    });
+  }
+
+  const query = `
+    SELECT
+      lr.id AS request_id,
+      lr.title,
+      lr.description,
+      DATE(lr.created_at) AS request_date,
+      TIME(lr.created_at) AS request_time,
+      DATEDIFF(CURDATE(), lr.status_updated_at) AS days_since_request,
+      CONCAT_WS(' ', p.firstName, NULLIF(p.middleName, ''), p.lastName) AS patient_name,
+      p.civilIdNumber AS patient_civil_id,
+      d.fullName AS doctor_name,
+      l.lab_name,
+      lr.sent_by,
+      lr.status
+    FROM lab_requests lr
+    JOIN patients p ON lr.patient_id = p.id
+    JOIN doctors d ON lr.doctor_id = d.id
+    JOIN labs l ON lr.lab_id = l.id
+    WHERE lr.id = ?
+  `;
+
+  pool.query(query, [id], (err, results) => {
+    if (err) {
+      console.error("SQL Error:", err);
+      return res.status(500).json({
+        success: false,
+        message: "Failed to retrieve lab request",
+        error: err.message,
+      });
+    }
+
+    if (!results || results.length === 0) {
+      return res.status(404).json({
+        success: false,
+        message: `No lab request found with ID '${id}'`,
+      });
+    }
+
+    return res.status(200).json({
+      success: true,
+      message: `Lab request with ID '${id}' retrieved successfully`,
+      data: results[0], // Only one result expected
+    });
+  });
+};
+
 const deleteLabRequest = (req, res) => {
   const { id } = req.params;
 
@@ -4782,10 +4962,160 @@ const addLabRequestAttachment = async (req, res) => {
   }
 };
 
+const updateLabRequestAttachment = async (req, res) => {
+  try {
+    const attachment_id = parseInt(req.params.attachment_id);
+    const { report_status, name } = req.body;
+    const file = req.file;
+
+    //  Validate ID
+    if (!attachment_id || isNaN(attachment_id)) {
+      return res.status(400).json({
+        success: false,
+        message: "Invalid or missing attachment_id in URL params",
+      });
+    }
+
+    // 🔄 Build dynamic fields to update
+    const updates = [];
+    const values = [];
+
+    if (report_status && typeof report_status === "string" && report_status.trim() !== "") {
+      updates.push("report_status = ?");
+      values.push(report_status);
+    }
+
+    if (name && typeof name === "string" && name.trim() !== "") {
+      updates.push("name = ?");
+      values.push(name);
+    }
+
+    if (file) {
+      updates.push("filename = ?");
+      values.push(file.filename);
+    }
+
+    //  If nothing to update
+    if (updates.length === 0) {
+      return res.status(400).json({
+        success: false,
+        message: "No valid fields provided for update",
+      });
+    }
+
+    //  Build query
+    const updateQuery = `
+      UPDATE lab_request_attachments
+      SET ${updates.join(", ")}
+      WHERE id = ?
+    `;
+    values.push(attachment_id); // For WHERE clause
+
+    pool.query(updateQuery, values, (err, result) => {
+      if (err) {
+        return res.status(500).json({
+          success: false,
+          message: "Failed to update attachment",
+          error: err.message,
+        });
+      }
+
+      if (result.affectedRows === 0) {
+        return res.status(404).json({
+          success: false,
+          message: `No attachment found with ID ${attachment_id}`,
+        });
+      }
+
+      return res.status(200).json({
+        success: true,
+        message: "Attachment updated successfully",
+      });
+    });
+
+  } catch (error) {
+    return res.status(500).json({
+      success: false,
+      message: "Internal Server Error",
+      error: error.message,
+    });
+  }
+};
+
+const getLabRequestAttachmentsByLabRequestId = (req, res) => {
+  const labRequestId = parseInt(req.params.labRequestId);
+
+  if (!labRequestId || isNaN(labRequestId)) {
+    return res.status(400).json({
+      success: false,
+      message: "Invalid or missing lab request ID",
+    });
+  }
+
+  const query = `
+    SELECT 
+      a.id AS attachment_id,
+      a.name AS attachment_name,
+      a.filename,
+      a.report_status,
+      a.uploaded_at,
+
+      lr.id AS lab_request_id,
+      lr.title AS request_title,
+      lr.description AS request_description,
+      lr.status AS request_status,
+      lr.created_at AS request_created_at,
+      lr.status_updated_at,
+
+      lr.sent_by,
+      lr.lab_id,
+      lr.doctor_id,
+      lr.patient_id,
+
+      l.lab_name AS lab_name,
+      CONCAT(d.fullName) AS doctor_name,
+      CONCAT_WS(' ', p.firstName, p.middleName, p.lastName) AS patient_name
+
+    FROM lab_request_attachments a
+    JOIN lab_requests lr ON a.lab_request_id = lr.id
+    LEFT JOIN labs l ON lr.lab_id = l.id
+    LEFT JOIN doctors d ON lr.doctor_id = d.id
+    LEFT JOIN patients p ON lr.patient_id = p.id
+    WHERE lr.id = ?
+    ORDER BY a.uploaded_at DESC
+  `;
+
+  pool.query(query, [labRequestId], (err, results) => {
+    if (err) {
+      return res.status(500).json({
+        success: false,
+        message: "Database query failed",
+        error: err.message,
+      });
+    }
+
+    if (!results || results.length === 0) {
+      return res.status(404).json({
+        success: false,
+        message: `No attachments found for lab request ID ${labRequestId}`,
+      });
+    }
+
+    return res.status(200).json({
+      success: true,
+      message: "Attachments for lab request with names retrieved successfully",
+      data: results,
+    });
+  });
+};
+
+
 export default {
   getAllUsers,
   changeUserStatus,
   deleteUserById,
+  getAllStaff,
+  getAllNurses,
   getAllDoctors,
   changeDoctorStatus,
   getActiveDoctors,
@@ -4848,8 +5178,11 @@ export default {
   getLabRequestsByPatient,
   updateLabRequestStatus,
   getLabRequestsByStatus,
+  getLabRequestById,
   deleteLabRequest,
   editLabRequest,
-  addLabRequestAttachment
+  addLabRequestAttachment,
+  updateLabRequestAttachment,
+  getLabRequestAttachmentsByLabRequestId
 };
 

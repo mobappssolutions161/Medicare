@@ -6,6 +6,8 @@ import upload from "../../upload.js"
 
 router.get("/getAllUsers", adminController.getAllUsers)
 router.get("/getActiveDoctors", adminController.getActiveDoctors)
+router.get("/getAllStaff", adminController.getAllStaff)
+router.get("/getAllNurses", adminController.getAllNurses)
 router.get("/getAllDoctors", adminController.getAllDoctors)
 router.delete("/deleteDoctor/:doctorId", adminController.deleteDoctor)
 router.post("/changeDoctorStatus/:doctorId", adminController.changeDoctorStatus)
@@ -88,8 +90,11 @@ router.post("/addLabRequest",adminController.addLabRequest)
 router.get("/getLabRequestsByPatient/:patientId",adminController.getLabRequestsByPatient)
 router.post("/updateLabRequestStatus/:requestId",adminController.updateLabRequestStatus)
 router.post("/getLabRequestsByStatus",adminController.getLabRequestsByStatus)
+router.get("/getLabRequestById/:id",adminController.getLabRequestById)
 router.put("/editLabRequest/:id",adminController.editLabRequest)
 router.delete("/deleteLabRequest/:id",adminController.deleteLabRequest)
 router.post("/addLabRequestAttachment/:lab_request_id",upload.single('file'),adminController.addLabRequestAttachment)
+router.post("/updateLabRequestAttachment/:attachment_id",upload.single('file'),adminController.updateLabRequestAttachment)
+router.get("/getLabRequestAttachmentsByLabRequestId/:labRequestId",adminController.getLabRequestAttachmentsByLabRequestId)
 
 export default router;
