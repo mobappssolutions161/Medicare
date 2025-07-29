@@ -32,9 +32,27 @@ function isValidSchedule(item) {
 const getAllUsers = async (req, res) => {
   try {
     const query = `
-      SELECT users.*, doctors.fullName, doctors.licenseId 
-      FROM users 
-      LEFT JOIN doctors ON doctors.user_id = users.id 
+      SELECT 
+        users.id AS userId,
+        users.email,
+        users.password,
+        users.role,
+        users.is_active,
+        users.createdAt,
+        doctors.fullName,
+        doctors.phoneNumber,
+        doctors.shortName,
+        doctors.prefix,
+        doctors.dateOfBirth,
+        doctors.gender,
+        doctors.specialty,
+        doctors.licenseId,
+        doctors.civilId,
+        doctors.passport,
+        doctors.personalPhoto,
+        doctors.user_id
+      FROM users
+      LEFT JOIN doctors ON doctors.user_id = users.id
       WHERE users.is_deleted = 0
     `;
 
@@ -54,10 +72,31 @@ const getAllUsers = async (req, res) => {
         });
       }
 
+      const mappedUsers = result.map(user => ({
+        userId: user.userId,
+        email: user.email,
+        password: user.password,
+        role: user.role,
+        is_active: user.is_active,
+        createdAt: user.createdAt,
+        fullName : user.fullName,
+        civilId: user.civilId,
+        passport: user.passport,
+        dateOfBirth: user.dateOfBirth,
+        gender: user.gender,
+        phoneNumber: user.phoneNumber,
+        specialty: user.specialty,
+        licenseId: user.licenseId,
+        user_id: user.user_id,
+        personalPhoto: user.personalPhoto || null,
+        shortName: user.shortName,
+        prefix: user.prefix,
+      }));
+
       return res.status(200).json({
         success: true,
         message: "All users fetched successfully",
-        data: result,
+        data: mappedUsers,
       });
     });
   } catch (err) {
@@ -196,7 +235,25 @@ const deleteUserById = async (req, res) => {
 const getAllStaff = async (req, res) => {
   try {
     const query = `
-      SELECT users.*, doctors.fullName, doctors.licenseId 
+      SELECT 
+        users.id AS userId,
+        users.email,
+        users.password,
+        users.role,
+        users.is_active,
+        users.createdAt,
+        doctors.fullName,
+        doctors.licenseId,
+        doctors.phoneNumber,
+        doctors.shortName,
+        doctors.prefix,
+        doctors.dateOfBirth,
+        doctors.gender,
+        doctors.specialty,
+        doctors.civilId,
+        doctors.passport,
+        doctors.personalPhoto,
+        doctors.user_id
       FROM users 
       LEFT JOIN doctors ON doctors.user_id = users.id 
       WHERE users.role IN ("receptionist", "admin") AND users.is_deleted = 0
@@ -211,10 +268,31 @@ const getAllStaff = async (req, res) => {
         });
       }
 
+      const staffList = result.map(user => ({
+        userId: user.userId,
+        email: user.email,
+        password: user.password,
+        role: user.role,
+        is_active: user.is_active,
+        createdAt: user.createdAt,
+        fullName: user.fullName,
+        licenseId: user.licenseId,
+        civilId: user.civilId,
+        passport: user.passport,
+        dateOfBirth: user.dateOfBirth,
+        gender: user.gender,
+        phoneNumber: user.phoneNumber,
+        specialty: user.specialty,
+        user_id: user.user_id,
+        personalPhoto: user.personalPhoto || null,
+        shortName: user.shortName,
+        prefix: user.prefix,
+      }));
+
       return res.status(200).json({
         success: true,
         message: "Staff fetched successfully",
-        data: result,
+        data: staffList,
       });
     });
   } catch (err) {
@@ -225,7 +303,25 @@ const getAllStaff = async (req, res) => {
 const getAllNurses = async (req, res) => {
   try {
     const query = `
-      SELECT users.*, doctors.fullName, doctors.licenseId 
+      SELECT 
+        users.id AS userId,
+        users.email,
+        users.password,
+        users.role,
+        users.is_active,
+        users.createdAt,
+        doctors.fullName,
+        doctors.licenseId,
+        doctors.phoneNumber,
+        doctors.shortName,
+        doctors.prefix,
+        doctors.dateOfBirth,
+        doctors.gender,
+        doctors.specialty,
+        doctors.civilId,
+        doctors.passport,
+        doctors.personalPhoto,
+        doctors.user_id
       FROM users 
       LEFT JOIN doctors ON doctors.user_id = users.id 
       WHERE users.role = "nurse" AND users.is_deleted = 0
@@ -240,10 +336,31 @@ const getAllNurses = async (req, res) => {
         });
       }
 
+      const nurseList = result.map(user => ({
+        userId: user.userId,
+        email: user.email,
+        password: user.password,
+        role: user.role,
+        is_active: user.is_active,
+        createdAt: user.createdAt,
+        fullName: user.fullName,
+        licenseId: user.licenseId,
+        civilId: user.civilId,
+        passport: user.passport,
+        dateOfBirth: user.dateOfBirth,
+        gender: user.gender,
+        phoneNumber: user.phoneNumber,
+        specialty: user.specialty,
+        user_id: user.user_id,
+        personalPhoto: user.personalPhoto || null,
+        shortName: user.shortName,
+        prefix: user.prefix,
+      }));
+
       return res.status(200).json({
         success: true,
         message: "Nurses fetched successfully",
-        data: result,
+        data: nurseList,
       });
     });
   } catch (err) {
@@ -254,7 +371,7 @@ const getAllNurses = async (req, res) => {
 const getAllDoctors = async (req, res) => {
   try {
     const doctorQuery = `
-      SELECT users.*, doctors.fullName, doctors.licenseId 
+      SELECT users.*, doctors.*
       FROM users 
       LEFT JOIN doctors ON doctors.user_id = users.id
       WHERE users.role = "doctor" AND users.is_deleted = 0
@@ -540,26 +657,63 @@ const softDeleteUser = async (req, res) => {
 
 const deleteDoctor = async (req, res) => {
   try {
-    const doctorId = req.params.doctorId;
-    if (!doctorId) {
+    const userId = req.params.userId;
+
+    if (!userId) {
       return res.status(400).json({
         success: false,
-        message: "Doctor ID is required",
+        message: "User ID is required",
       });
     }
-    const query = "DELETE FROM doctors WHERE id = ?";
-    pool.query(query, [doctorId], (err, result) => {
+
+    // Step 1: Get the user's role
+    const getUserQuery = "SELECT role FROM users WHERE id = ?";
+    pool.query(getUserQuery, [userId], (err, userResult) => {
       if (err) {
         return res.status(500).json({
           success: false,
-          message: "Error deleting doctor",
+          message: "Error fetching user role",
           error: err.message,
         });
       }
 
-      return res
-        .status(200)
-        .json({ success: true, message: "Doctor deleted successfully" });
+      if (!userResult || userResult.length === 0) {
+        return res.status(404).json({
+          success: false,
+          message: "User not found",
+        });
+      }
+
+      const userRole = userResult[0].role;
+
+      // Step 2: Delete from doctors table if role is doctor/nurse/admin/receptionist
+      const deleteDoctorQuery = "DELETE FROM doctors WHERE user_id = ?";
+      pool.query(deleteDoctorQuery, [userId], (err, doctorResult) => {
+        if (err) {
+          return res.status(500).json({
+            success: false,
+            message: "Error deleting record from doctors table",
+            error: err.message,
+          });
+        }
+
+        // Step 3: Delete from users table
+        const deleteUserQuery = "DELETE FROM users WHERE id = ?";
+        pool.query(deleteUserQuery, [userId], (err, userDelResult) => {
+          if (err) {
+            return res.status(500).json({
+              success: false,
+              message: "Doctor deleted, but error deleting user",
+              error: err.message,
+            });
+          }
+
+          return res.status(200).json({
+            success: true,
+            message: `${userRole.charAt(0).toUpperCase() + userRole.slice(1)} deleted successfully`,
+          });
+        });
+      });
     });
   } catch (error) {
     return res.status(500).json({
@@ -812,7 +966,7 @@ const registerPatient = async (req, res) => {
             });
           }
 
-          const profileImage = req.files?.profileImage?.[0]?.filename || null;
+          const profileImage = req.files?.profileImage?.[0]?.filename || 'defaultPic.jpg';
           const cprScan = req.files?.cprScan?.[0]?.filename || null;
           const passportCopy = req.files?.passportCopy?.[0]?.filename || null;
 
@@ -1653,10 +1807,9 @@ const getUpcomingAppointment = async (req, res) => {
       FROM appointments a
       JOIN patients p ON a.patientId = p.id
       WHERE 
-        TIMESTAMP(DATE(a.appointmentDate), a.startTime) > NOW()
+        TIMESTAMP(DATE(a.appointmentDate), a.startTime) >= DATE_ADD(CURDATE(), INTERVAL 1 DAY)
         AND a.status = 'Confirmed'
       ORDER BY TIMESTAMP(DATE(a.appointmentDate), a.startTime) ASC
-      LIMIT 1
     `;
 
     const rows = await new Promise((resolve, reject) => {
@@ -1669,28 +1822,27 @@ const getUpcomingAppointment = async (req, res) => {
     if (!rows || rows.length === 0) {
       return res.status(404).json({
         success: false,
-        message: "No upcoming confirmed appointments found",
+        message: "No upcoming confirmed appointments from tomorrow onwards",
       });
     }
 
-    const appt = rows[0];
+    const appointments = rows.map((appt) => {
+      if (appt.startTime && appt.endTime) {
+        const [sh, sm] = appt.startTime.split(":").map(Number);
+        const [eh, em] = appt.endTime.split(":").map(Number);
+        appt.duration = `${(eh * 60 + em) - (sh * 60 + sm)} min`;
+      } else {
+        appt.duration = null;
+      }
 
-    // Duration calculation
-    if (appt.startTime && appt.endTime) {
-      const [sh, sm] = appt.startTime.split(":").map(Number);
-      const [eh, em] = appt.endTime.split(":").map(Number);
-      appt.duration = `${(eh * 60 + em) - (sh * 60 + sm)} min`;
-    } else {
-      appt.duration = null;
-    }
-
-    // Human-friendly "starts in" message
-    appt.startsInHuman = toHuman(appt.startsInMinutes);
+      appt.startsInHuman = toHuman(appt.startsInMinutes);
+      return appt;
+    });
 
     return res.status(200).json({
       success: true,
-      message: "Upcoming confirmed appointment fetched successfully",
-      data: appt,
+      message: "Upcoming confirmed appointments from tomorrow fetched successfully",
+      data: appointments,
     });
 
     function toHuman(minutes) {
@@ -1703,10 +1855,10 @@ const getUpcomingAppointment = async (req, res) => {
       return `${m}m`;
     }
   } catch (error) {
-    console.error("Error fetching upcoming appointment:", error);
+    console.error("Error fetching upcoming appointments:", error);
     return res.status(500).json({
       success: false,
-      message: "An error occurred while fetching upcoming appointment",
+      message: "An error occurred while fetching upcoming appointments",
       error: error.message,
     });
   }
@@ -2217,6 +2369,7 @@ const getAppointmentsByDate = async (req, res) => {
         a.doctorId, 
         a.status, 
         a.reason,
+        a.duration,
         DATE_FORMAT(a.appointmentDate, '%Y-%m-%d %H:%i:%s') AS appointmentDate,
         DATE_FORMAT(a.startTime, '%H:%i:%s') AS startTime,
         DATE_FORMAT(a.endTime, '%H:%i:%s') AS endTime,
@@ -2270,7 +2423,6 @@ const appointmentByDoctorId = async (req, res) => {
   try {
     let { doctorIds } = req.body;
 
-    // Validate
     if (!Array.isArray(doctorIds) || doctorIds.length === 0) {
       return res.status(400).json({
         success: false,
@@ -2278,11 +2430,17 @@ const appointmentByDoctorId = async (req, res) => {
       });
     }
 
-    // Sanitize (convert to numbers, remove invalid entries)
     doctorIds = doctorIds.map(id => Number(id)).filter(id => !isNaN(id));
-
     const placeholders = doctorIds.map(() => "?").join(",");
-    const query = `SELECT * FROM appointments WHERE doctorId IN (${placeholders})`;
+
+    const query = `
+      SELECT 
+        a.*,
+        p.mobileNumber AS mobileNumber
+      FROM appointments a
+      JOIN patients p ON p.id = a.patientId
+      WHERE a.doctorId IN (${placeholders})
+    `;
 
     const getAppointments = () => {
       return new Promise((resolve, reject) => {
@@ -4093,7 +4251,7 @@ const addLabs = async(req,res)=>{
       if (!lab_name) {
       return res.status(400).json({
         success: false,
-        message:"Missing required fields: lab_name",
+        message:"Missing required fields: Lab name",
       });
     }
       if (!email) {
@@ -4106,7 +4264,7 @@ const addLabs = async(req,res)=>{
     if (!phone) {
     return res.status(400).json({
       success: false,
-      message:"Missing required fields: phone",
+      message:"Missing required fields: phone number",
     });
   }
     if (!address) {
@@ -4169,7 +4327,42 @@ pool.query(insertQuery, [lab_name, email, phone, speciality, notes, address], (i
   }
 }
 
-const getAllLabs = async (req, res) => {
+const getAllLabs = async (req,res)=>{
+  try {
+    const getQuery = `Select * from labs`
+
+    pool.query(getQuery,(err,result)=>{
+      if(err){
+        return res.status(500).json({
+          success : false,
+          message : "Error while getting result"
+        })
+      }
+      if(result.length === 0){
+        return res.status(200).json({
+          success: true,
+          message: "No appointments found",
+          data: []
+          });
+      }else{
+        return res.status(200).json({
+          success : true,
+          message : "All labs retrived successfully",
+          data: result
+        })
+      }
+    })
+
+  } catch (error) {
+    return res.status(500).json({
+      success : false,
+      message : "Internal Server Error",
+      error : error.message
+    })
+  }
+}
+
+const getAllActiveLabs = async (req, res) => {
   try {
     const getQuery = `SELECT * FROM labs WHERE is_active = 1`;
 
@@ -4510,6 +4703,7 @@ const addLabRequest = async (req, res) => {
 };
 
 //  Helper to send response using created_at for date/time
+
 const sendFinalResponse = (res, labRequestId) => {
   const query = `
     SELECT
@@ -5109,6 +5303,49 @@ const getLabRequestAttachmentsByLabRequestId = (req, res) => {
   });
 };
 
+const deleteLabRequestAttachment = async (req, res) => {
+  try {
+    const attachment_id = parseInt(req.params.attachment_id);
+
+    // 🔍 Validate attachment_id
+    if (!attachment_id || isNaN(attachment_id)) {
+      return res.status(400).json({
+        success: false,
+        message: "Invalid or missing attachment_id in URL params",
+      });
+    }
+
+    const deleteQuery = `DELETE FROM lab_request_attachments WHERE id = ?`;
+
+    pool.query(deleteQuery, [attachment_id], (err, result) => {
+      if (err) {
+        return res.status(500).json({
+          success: false,
+          message: "Failed to delete attachment",
+          error: err.message,
+        });
+      }
+
+      if (result.affectedRows === 0) {
+        return res.status(404).json({
+          success: false,
+          message: `No attachment found with ID ${attachment_id}`,
+        });
+      }
+
+      return res.status(200).json({
+        success: true,
+        message: `Attachment with ID ${attachment_id} deleted successfully`,
+      });
+    });
+  } catch (error) {
+    return res.status(500).json({
+      success: false,
+      message: "Internal Server Error",
+      error: error.message,
+    });
+  }
+};
 
 export default {
   getAllUsers,
@@ -5169,6 +5406,7 @@ export default {
   getNationalitiesList,
   getDiagnosisList,
   addLabs,
+  getAllActiveLabs,
   getAllLabs,
   getLabById,
   updateLabById,
@@ -5183,6 +5421,7 @@ export default {
   editLabRequest,
   addLabRequestAttachment,
   updateLabRequestAttachment,
-  getLabRequestAttachmentsByLabRequestId
+  getLabRequestAttachmentsByLabRequestId,
+  deleteLabRequestAttachment
 };
 

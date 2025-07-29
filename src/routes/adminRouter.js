@@ -9,7 +9,7 @@ router.get("/getActiveDoctors", adminController.getActiveDoctors)
 router.get("/getAllStaff", adminController.getAllStaff)
 router.get("/getAllNurses", adminController.getAllNurses)
 router.get("/getAllDoctors", adminController.getAllDoctors)
-router.delete("/deleteDoctor/:doctorId", adminController.deleteDoctor)
+router.delete("/deleteDoctor/:userId", adminController.deleteDoctor)
 router.post("/changeDoctorStatus/:doctorId", adminController.changeDoctorStatus)
 
 router.post("/changeUserStatus/:userId", adminController.changeUserStatus)
@@ -81,6 +81,7 @@ router.get("/getServices", adminController.getServices)
 
 router.post("/addLabs", adminController.addLabs)
 router.get("/getAllLabs", adminController.getAllLabs)
+router.get("/getAllActiveLabs", adminController.getAllActiveLabs)
 router.get("/getLabById/:labId", adminController.getLabById)
 router.put("/updateLabById/:labId", adminController.updateLabById)
 router.delete("/deleteLabById/:labId", adminController.deleteLabById)
@@ -96,5 +97,6 @@ router.delete("/deleteLabRequest/:id",adminController.deleteLabRequest)
 router.post("/addLabRequestAttachment/:lab_request_id",upload.single('file'),adminController.addLabRequestAttachment)
 router.post("/updateLabRequestAttachment/:attachment_id",upload.single('file'),adminController.updateLabRequestAttachment)
 router.get("/getLabRequestAttachmentsByLabRequestId/:labRequestId",adminController.getLabRequestAttachmentsByLabRequestId)
+router.delete("/deleteLabRequestAttachment/:attachment_id",adminController.deleteLabRequestAttachment)
 
 export default router;

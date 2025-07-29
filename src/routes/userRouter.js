@@ -11,7 +11,7 @@ router.post("/userOtpGenerate",userController.userOtpGenerate)
 router.post("/userVerifyOtp",userController.userVerifyOtp)
 router.post("/userResetPassword/:id",userController.userResetPassword)
 router.post("/addDoctorDetails",upload.single("personalPhoto"),userController.addDoctorDetails )
-router.put("/updateDoctorDetails/:doctorId",upload.single("personalPhoto"),userController.updateDoctorDetails )
+router.put("/updateDoctorDetails/:userId",upload.single("personalPhoto"),userController.updateDoctorDetails )
 
 
 export default router
