@@ -657,60 +657,81 @@ const softDeleteUser = async (req, res) => {
 
 const deleteDoctor = async (req, res) => {
   try {
-    const userId = req.params.userId;
+    const doctorId = req.params.doctorId;
 
-    if (!userId) {
+    if (!doctorId) {
       return res.status(400).json({
         success: false,
-        message: "User ID is required",
+        message: "Doctor ID is required",
       });
     }
 
-    // Step 1: Get the user's role
-    const getUserQuery = "SELECT role FROM users WHERE id = ?";
-    pool.query(getUserQuery, [userId], (err, userResult) => {
+    // Step 1: Get user_id from doctors table
+    const getDoctorQuery = "SELECT user_id FROM doctors WHERE id = ?";
+    pool.query(getDoctorQuery, [doctorId], (err, doctorResult) => {
       if (err) {
         return res.status(500).json({
           success: false,
-          message: "Error fetching user role",
+          message: "Error fetching doctor info",
           error: err.message,
         });
       }
 
-      if (!userResult || userResult.length === 0) {
+      if (!doctorResult || doctorResult.length === 0) {
         return res.status(404).json({
           success: false,
-          message: "User not found",
+          message: "Doctor not found",
         });
       }
 
-      const userRole = userResult[0].role;
+      const userId = doctorResult[0].user_id;
 
-      // Step 2: Delete from doctors table if role is doctor/nurse/admin/receptionist
-      const deleteDoctorQuery = "DELETE FROM doctors WHERE user_id = ?";
-      pool.query(deleteDoctorQuery, [userId], (err, doctorResult) => {
+      // Step 2: Get role from users table using user_id
+      const getUserRoleQuery = "SELECT role FROM users WHERE id = ?";
+      pool.query(getUserRoleQuery, [userId], (err, userResult) => {
         if (err) {
           return res.status(500).json({
             success: false,
-            message: "Error deleting record from doctors table",
+            message: "Error fetching user role",
             error: err.message,
           });
         }
 
-        // Step 3: Delete from users table
-        const deleteUserQuery = "DELETE FROM users WHERE id = ?";
-        pool.query(deleteUserQuery, [userId], (err, userDelResult) => {
+        if (!userResult || userResult.length === 0) {
+          return res.status(404).json({
+            success: false,
+            message: "Associated user not found",
+          });
+        }
+
+        const userRole = userResult[0].role;
+
+        // Step 3: Delete from doctors table
+        const deleteDoctorQuery = "DELETE FROM doctors WHERE id = ?";
+        pool.query(deleteDoctorQuery, [doctorId], (err, doctorDeleteResult) => {
           if (err) {
             return res.status(500).json({
               success: false,
-              message: "Doctor deleted, but error deleting user",
+              message: "Error deleting doctor",
               error: err.message,
             });
           }
 
-          return res.status(200).json({
-            success: true,
-            message: `${userRole.charAt(0).toUpperCase() + userRole.slice(1)} deleted successfully`,
+          // Step 4: Delete from users table
+          const deleteUserQuery = "DELETE FROM users WHERE id = ?";
+          pool.query(deleteUserQuery, [userId], (err, userDeleteResult) => {
+            if (err) {
+              return res.status(500).json({
+                success: false,
+                message: "Doctor deleted, but error deleting user",
+                error: err.message,
+              });
+            }
+
+            return res.status(200).json({
+              success: true,
+              message: `${userRole.charAt(0).toUpperCase() + userRole.slice(1)} deleted successfully`,
+            });
           });
         });
       });
@@ -1312,7 +1333,9 @@ const AddPatientServices = async (req, res) => {
     });
   }
 };
+
 // GET API to retrieve patient service list
+
 const GetPatientServices = async (req, res) => {
   try {
     const patientId = req.params.id;
@@ -1498,6 +1521,7 @@ const createAppointment = (req, res) => {
     startTime,
     endTime,
     reason,
+    status: userStatus // new optional field
   } = req.body;
 
   if (!patientId || !appointmentDate) {
@@ -1586,11 +1610,11 @@ const createAppointment = (req, res) => {
               endTime,
               reason,
               res,
-              patientResult[0],
-              doctorResult[0]
+              userStatus // Pass the optional status from request
             );
           });
         } else {
+          // No doctor selected
           insertAppointment(
             patientId,
             patientName,
@@ -1601,8 +1625,7 @@ const createAppointment = (req, res) => {
             endTime,
             reason,
             res,
-            patientResult[0],
-            {}
+            userStatus
           );
         }
       }
@@ -1620,13 +1643,15 @@ const insertAppointment = (
   endTime,
   reason,
   res,
-  // patientData,
-  // doctorData = {}
+  userStatus // new param
 ) => {
-  const isConfirmed = doctorId && startTime && endTime;
-  const status = isConfirmed ? "Booked" : "waiting";
+  // Determine status
+  let status = "Booked"; // default
+  if (userStatus && userStatus.toLowerCase() === "waiting") {
+    status = "waiting";
+  }
 
-  // Duration calculation (in minutes)
+  // Duration calculation
   const getDurationInMinutes = (start, end) => {
     const [sh, sm] = start.split(":").map(Number);
     const [eh, em] = end.split(":").map(Number);
@@ -1635,7 +1660,9 @@ const insertAppointment = (
     return Math.round((endDate - startDate) / (1000 * 60));
   };
 
-  const duration = isConfirmed ? getDurationInMinutes(startTime, endTime) : 30;
+  const duration = doctorId && startTime && endTime
+    ? getDurationInMinutes(startTime, endTime)
+    : 30;
 
   const insertQuery = `
     INSERT INTO appointments 
@@ -1672,7 +1699,7 @@ const insertAppointment = (
         data: {
           appointmentId: result.insertId,
           status,
-          duration
+          duration,
         },
       });
     }
@@ -2419,6 +2446,66 @@ const getAppointmentsByDate = async (req, res) => {
   }
 };
 
+const getAppointmentsByDoctorId = async (req, res) => {
+  try {
+    const doctorId = Number(req.params.doctorId);
+
+    if (isNaN(doctorId)) {
+      return res.status(400).json({
+        success: false,
+        message: "Invalid doctorId. Must be a number.",
+      });
+    }
+
+    const query = `
+      SELECT 
+        a.*,
+        p.firstName AS patientFirstName,
+        p.lastName AS patientLastName,
+        p.mobileNumber AS patientMobileNumber,
+        d.fullName AS doctorName
+      FROM appointments a
+      JOIN patients p ON p.id = a.patientId
+      JOIN doctors d ON d.id = a.doctorId
+      WHERE a.doctorId = ?
+      ORDER BY a.appointmentDate DESC, a.startTime DESC
+    `;
+
+    pool.query(query, [doctorId], (err, results) => {
+      if (err) {
+        console.error("Database error:", err);
+        return res.status(500).json({
+          success: false,
+          message: "Database error",
+          error: err.message,
+        });
+      }
+
+      if (results.length === 0) {
+        return res.status(200).json({
+          success: true,
+          message: "No appointments found for this doctor",
+          data: [],
+        });
+      }
+
+      return res.status(200).json({
+        success: true,
+          message: "Appointments fetched successfully",
+        data: results,
+      });
+    });
+  } catch (error) {
+    console.error("Server error:", error);
+    return res.status(500).json({
+      success: false,
+      message: "Server error",
+      error: error.message,
+    });
+  }
+};
+
+
 const appointmentByDoctorId = async (req, res) => {
   try {
     let { doctorIds } = req.body;
@@ -2626,12 +2713,12 @@ const changeAppointmentStatus = async (req, res) => {
       });
     }
 
-    const validStatuses = ["No-show", "Completed", "Cancelled" ,"Confirmed"];
+    const validStatuses = ["No-show", "Completed", "Cancelled" ,"Confirmed","Waiting","Booked"];
     if (!status || !validStatuses.includes(status)) {
       return res.status(400).json({
         success: false,
         message:
-          "Invalid or missing status. Allowed values: 'No-Show', 'Completed', 'Cancelled' , 'Confirmed' ",
+          "Invalid or missing status. Allowed values: 'No-Show', 'Completed', 'Cancelled' , 'Confirmed' ,'Waiting','Booked'",
       });
     }
 
@@ -2948,7 +3035,6 @@ const getPatientVitalsByPatientId = async (req, res) => {
     });
   }
 };
-
 
 const updatePatientVitals = async (req, res) => {
   try {
@@ -4284,7 +4370,7 @@ const addLabs = async(req,res)=>{
   }
 
     if(checkResult.length>0){
-      return res.status(500).json({
+      return res.status(400).json({
       success: false,
       message: "Record already exists. Duplicate entries are not allowed.",
     });
@@ -5376,6 +5462,7 @@ export default {
   deleteAppointments,
   getAllNationalities,
   doctorAvailability,
+  getAppointmentsByDoctorId,
   appointmentByDoctorId,
   getAppointmentsByDate,
   appointmentByPatientId,

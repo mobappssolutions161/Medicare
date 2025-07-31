@@ -417,148 +417,85 @@ const addDoctorDetails = async (req, res) => {
 };
 
 
-const updateDoctorDetails = (req, res) => {
-  const userId = req.params.userId;
-
-  if (!userId) {
-    return res.status(400).json({
-      success: false,
-      message: "User ID is required"
-    });
-  }
-
-  const {
-    email,
-    fullName,
-    shortName,
-    prefix,
-    dateOfBirth,
-    licenseId,
-    civilId,
-    passport,
-    gender,
-    specialty
-  } = req.body;
-
-  const personalPhoto = req.file ? req.file.filename : null;
-
-  // Step 1: Fetch doctor details by userId
-  const getDoctorQuery = `
-    SELECT d.*, u.email AS currentEmail
-    FROM doctors d
-    JOIN users u ON d.user_id = u.id
-    WHERE d.user_id = ?
-  `;
-
-  pool.query(getDoctorQuery, [userId], (err, results) => {
-    if (err) {
-      return res.status(500).json({
+const updateDoctorDetails = async (req, res) => {
+  try {
+    const doctorId = req.params.doctorId;
+    if (!doctorId) {
+      return res.status(400).json({
         success: false,
-        message: "Error fetching doctor details",
-        error: err.message
+        message: "Doctor ID is required",
       });
     }
 
-    if (results.length === 0) {
-      return res.status(404).json({
-        success: false,
-        message: "Doctor not found"
-      });
-    }
+    const {
+      email, // user table
+      ...doctorFields // rest for doctor table
+    } = req.body;
 
-    const existing = results[0];
+    // Step 1: Get user_id from doctor table
+    const getUserIdQuery = "SELECT user_id FROM doctors WHERE id = ?";
+    pool.query(getUserIdQuery, [doctorId], (err, result) => {
+      if (err || result.length === 0) {
+        return res.status(404).json({
+          success: false,
+          message: "Doctor not found",
+          error: err?.message,
+        });
+      }
 
-    // Step 2: Check email update
-    if (email && email !== existing.currentEmail) {
-      const emailCheckQuery = `SELECT id FROM users WHERE email = ? AND id != ?`;
-      pool.query(emailCheckQuery, [email, userId], (emailErr, emailRes) => {
-        if (emailErr) {
-          return res.status(500).json({
-            success: false,
-            message: "Error checking email",
-            error: emailErr.message
-          });
-        }
+      const userId = result[0].user_id;
 
-        if (emailRes.length > 0) {
-          return res.status(400).json({
-            success: false,
-            message: "Email is already used by another user"
-          });
-        }
-
-        // Update email
-        const updateEmailQuery = `UPDATE users SET email = ? WHERE id = ?`;
+      // Step 2: Update users table if email provided
+      if (email) {
+        const updateEmailQuery = "UPDATE users SET email = ? WHERE id = ?";
         pool.query(updateEmailQuery, [email, userId], (err) => {
           if (err) {
             return res.status(500).json({
               success: false,
-              message: "Error updating email",
-              error: err.message
+              message: "Error updating user email",
+              error: err.message,
             });
           }
-
-          // Proceed to update doctor data
-          updateDoctorData(existing);
         });
-      });
-    } else {
-      // No email change
-      updateDoctorData(existing);
-    }
+      }
 
-    // Step 3: Update doctor table
-    function updateDoctorData(existing) {
-      const updatedFields = {
-        fullName: fullName || existing.fullName,
-        shortName: shortName || existing.shortName,
-        prefix: prefix || existing.prefix,
-        dateOfBirth: dateOfBirth || existing.dateOfBirth,
-        licenseId: licenseId || existing.licenseId,
-        civilId: civilId || existing.civilId,
-        passport: passport || existing.passport,
-        gender: gender || existing.gender,
-        specialty: specialty || existing.specialty,
-        personalPhoto: personalPhoto || existing.personalPhoto
-      };
+      // Step 3: Dynamically build UPDATE for doctor fields
+      const keys = Object.keys(doctorFields);
+      if (keys.length === 0) {
+        return res.status(400).json({
+          success: false,
+          message: "No doctor fields provided to update",
+        });
+      }
 
-      const updateDoctorQuery = `
-        UPDATE doctors SET
-          fullName = ?, shortName = ?, prefix = ?, dateOfBirth = ?, licenseId = ?,
-          civilId = ?, passport = ?, gender = ?, specialty = ?, personalPhoto = ?, updatedAt = NOW()
-        WHERE user_id = ?
-      `;
+      const fieldsToUpdate = keys.map((key) => `${key} = ?`).join(", ");
+      const values = keys.map((key) => doctorFields[key]);
 
-      const values = [
-        updatedFields.fullName,
-        updatedFields.shortName,
-        updatedFields.prefix,
-        updatedFields.dateOfBirth,
-        updatedFields.licenseId,
-        updatedFields.civilId,
-        updatedFields.passport,
-        updatedFields.gender,
-        updatedFields.specialty,
-        updatedFields.personalPhoto,
-        userId
-      ];
+      const updateDoctorQuery = `UPDATE doctors SET ${fieldsToUpdate} WHERE id = ?`;
+      values.push(doctorId); // add doctorId at the end
 
-      pool.query(updateDoctorQuery, values, (updateErr) => {
-        if (updateErr) {
+      pool.query(updateDoctorQuery, values, (err) => {
+        if (err) {
           return res.status(500).json({
             success: false,
             message: "Error updating doctor details",
-            error: updateErr.message
+            error: err.message,
           });
         }
 
         return res.status(200).json({
           success: true,
-          message: "Doctor details updated successfully"
+          message: "Doctor details updated successfully",
         });
       });
-    }
-  });
+    });
+  } catch (error) {
+    return res.status(500).json({
+      success: false,
+      message: "Internal Server Error",
+      error: error.message,
+    });
+  }
 };
 
 
