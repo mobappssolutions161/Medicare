@@ -80,11 +80,11 @@ router.delete("/deleteDrug/:drugId", adminController.deleteDrug)
 router.post("/addServices", adminController.addServices)
 router.get("/getServices", adminController.getServices)
 
-router.post("/addLabs", adminController.addLabs)
+router.post("/addLabs",upload.single("image"), adminController.addLabs)
 router.get("/getAllLabs", adminController.getAllLabs)
 router.get("/getAllActiveLabs", adminController.getAllActiveLabs)
 router.get("/getLabById/:labId", adminController.getLabById)
-router.put("/updateLabById/:labId", adminController.updateLabById)
+router.put("/updateLabById/:labId", upload.single("image"),adminController.updateLabById)
 router.delete("/deleteLabById/:labId", adminController.deleteLabById)
 router.put("/changeLabStatus/:labId", adminController.changeLabStatus)
 

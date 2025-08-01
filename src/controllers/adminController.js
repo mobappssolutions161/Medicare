@@ -50,7 +50,7 @@ const getAllUsers = async (req, res) => {
         doctors.civilId,
         doctors.passport,
         doctors.personalPhoto,
-        doctors.user_id
+        doctors.user_id as doctor_id
       FROM users
       LEFT JOIN doctors ON doctors.user_id = users.id
       WHERE users.is_deleted = 0
@@ -2368,26 +2368,16 @@ const doctorAvailability = async (req, res) => {
 
 const getAppointmentsByDate = async (req, res) => {
   try {
-    const { dates } = req.body; // ["2025-07-24","2025-07-07"]
-
-    if (!Array.isArray(dates) || dates.length === 0) {
-      return res.status(400).json({
-        success: false,
-        message: "dates must be a non-empty array of YYYY-MM-DD strings",
-      });
-    }
+    const { startDate, endDate } = req.body;
 
     const isoDateRegex = /^\d{4}-\d{2}-\d{2}$/;
-    const uniqDates = [...new Set(dates.map(d => (d || '').trim()))];
 
-    if (!uniqDates.every(d => isoDateRegex.test(d))) {
+    if (!startDate || !endDate || !isoDateRegex.test(startDate) || !isoDateRegex.test(endDate)) {
       return res.status(400).json({
         success: false,
-        message: "All dates must be in YYYY-MM-DD format",
+        message: "startDate and endDate must be valid YYYY-MM-DD strings",
       });
     }
-
-    const placeholders = uniqDates.map(() => "?").join(",");
 
     const query = `
       SELECT 
@@ -2403,14 +2393,12 @@ const getAppointmentsByDate = async (req, res) => {
         DATE_FORMAT(a.createdAt, '%Y-%m-%d %H:%i:%s') AS createdAt,
         DATE_FORMAT(a.updatedAt, '%Y-%m-%d %H:%i:%s') AS updatedAt,
 
-        -- Patient full name
         TRIM(CONCAT(
           p.firstName, 
           IF(p.middleName IS NULL OR p.middleName = '', '', CONCAT(' ', p.middleName)),
           IF(p.lastName   IS NULL OR p.lastName   = '', '', CONCAT(' ', p.lastName))
         )) AS patientName,
 
-        -- Doctor full name directly
         d.fullName AS doctorName,
 
         p.firstName, p.middleName, p.lastName, p.gender, 
@@ -2420,12 +2408,12 @@ const getAppointmentsByDate = async (req, res) => {
       FROM appointments a
       JOIN patients p ON a.patientId = p.id
       LEFT JOIN doctors d ON a.doctorId = d.id
-      WHERE DATE(a.appointmentDate) IN (${placeholders})
+      WHERE DATE(a.appointmentDate) BETWEEN ? AND ?
       ORDER BY a.appointmentDate ASC, a.startTime ASC, a.endTime ASC
     `;
 
     const appointments = await new Promise((resolve, reject) => {
-      pool.query(query, uniqDates, (err, results) => {
+      pool.query(query, [startDate, endDate], (err, results) => {
         if (err) return reject(err);
         resolve(results);
       });
@@ -2433,11 +2421,11 @@ const getAppointmentsByDate = async (req, res) => {
 
     return res.status(200).json({
       success: true,
-      message: `Appointments for [${uniqDates.join(", ")}] fetched successfully`,
+      message: `Appointments from ${startDate} to ${endDate} fetched successfully`,
       data: appointments,
     });
   } catch (error) {
-    console.error("Error fetching appointments by dates:", error);
+    console.error("Error fetching appointments by date range:", error);
     return res.status(500).json({
       success: false,
       message: "An error occurred while retrieving appointments",
@@ -2504,7 +2492,6 @@ const getAppointmentsByDoctorId = async (req, res) => {
     });
   }
 };
-
 
 const appointmentByDoctorId = async (req, res) => {
   try {
@@ -4330,80 +4317,67 @@ const getDiagnosisList = async (req, res) => {
   }
 };
 
-const addLabs = async(req,res)=>{
+const addLabs = async (req, res) => {
   try {
-    const {lab_name,notes,email,address,phone,speciality}=  req.body
+    const { lab_name, notes, email, address, phone, speciality } = req.body;
+    const image = req.file ? req.file.filename : null; // new line
 
-      if (!lab_name) {
+    if (!lab_name || !email || !phone || !address) {
       return res.status(400).json({
         success: false,
-        message:"Missing required fields: Lab name",
+        message: "Missing required fields: lab_name, email, phone, or address",
       });
     }
-      if (!email) {
-      return res.status(400).json({
-        success: false,
-        message:"Missing required fields: email",
-      });
-    }
-    
-    if (!phone) {
-    return res.status(400).json({
-      success: false,
-      message:"Missing required fields: phone number",
+
+    const checkQuery = `SELECT * FROM labs WHERE email = ? OR phone_number = ?`;
+    pool.query(checkQuery, [email, phone], (checkErr, checkResult) => {
+      if (checkErr) {
+        return res.status(500).json({
+          success: false,
+          message: "An error occurred while checking for existing records",
+        });
+      }
+
+      if (checkResult.length > 0) {
+        return res.status(400).json({
+          success: false,
+          message: "Record already exists. Duplicate entries are not allowed.",
+        });
+      }
+
+      const insertQuery = `
+        INSERT INTO labs (lab_name, email, phone_number, speciality, notes, address, image) 
+        VALUES (?, ?, ?, ?, ?, ?, ?)`;
+
+      pool.query(
+        insertQuery,
+        [lab_name, email, phone, speciality, notes, address, image],
+        (insertError, insertData) => {
+          if (insertError) {
+            return res.status(500).json({
+              success: false,
+              message: "Error inserting lab record",
+              error: insertError.message,
+            });
+          }
+
+          return res.status(201).json({
+            success: true,
+            message: "Lab added successfully",
+            data: {
+              labId: insertData.insertId,
+              lab_name,
+              email,
+              phone,
+              speciality,
+              notes,
+              address,
+              image,
+            },
+          });
+        }
+      );
     });
-  }
-    if (!address) {
-    return res.status(400).json({
-      success: false,
-      message:"Missing required fields: address",
-    });
-  }
-
-  const checkQuery = `SELECT * FROM labs WHERE email = ? OR phone_number = ?`;
-  pool.query(checkQuery,[email,phone],(checkErr,checkResult)=>{
-    if(checkErr){
-      return res.status(500).json({
-      success: false,
-      message: "An error occurred while checking for existing records",
-    });
-  }
-
-    if(checkResult.length>0){
-      return res.status(400).json({
-      success: false,
-      message: "Record already exists. Duplicate entries are not allowed.",
-    });
-  }
-
-
-  const insertQuery = `INSERT INTO labs (lab_name, email, phone_number, speciality, notes, address) 
-                     VALUES (?, ?, ?, ?, ?, ?)`;
-
-pool.query(insertQuery, [lab_name, email, phone, speciality, notes, address], (insertError, insertData) => {
-  if (insertError) {
-    return res.status(500).json({
-      success: false,
-      message: "Error inserting lab record",
-      error: insertError.message,
-    });
-  }
-
-  return res.status(201).json({
-    success: true,
-    message: "Lab added successfully",
-    data: {
-      labId: insertData.insertId,
-      lab_name,
-      email,
-      phone,
-      speciality,
-      notes,
-      address
-    }
-  });
-});
-  })
   } catch (error) {
     return res.status(500).json({
       success: false,
@@ -4411,42 +4385,51 @@ pool.query(insertQuery, [lab_name, email, phone, speciality, notes, address], (i
       error: error.message,
     });
   }
-}
+};
 
-const getAllLabs = async (req,res)=>{
+
+const getAllLabs = async (req, res) => {
   try {
-    const getQuery = `Select * from labs`
+    const getQuery = `
+      SELECT 
+        l.*, 
+        COUNT(lr.lab_id) AS assigned_count
+      FROM labs l
+      LEFT JOIN lab_requests lr ON l.id = lr.lab_id
+      GROUP BY l.id
+    `;
 
-    pool.query(getQuery,(err,result)=>{
-      if(err){
+    pool.query(getQuery, (err, result) => {
+      if (err) {
         return res.status(500).json({
-          success : false,
-          message : "Error while getting result"
-        })
+          success: false,
+          message: "Error while getting result"
+        });
       }
-      if(result.length === 0){
+      if (result.length === 0) {
         return res.status(200).json({
           success: true,
-          message: "No appointments found",
+          message: "No labs found",
           data: []
-          });
-      }else{
+        });
+      } else {
         return res.status(200).json({
-          success : true,
-          message : "All labs retrived successfully",
+          success: true,
+          message: "All labs retrieved successfully",
           data: result
-        })
+        });
       }
-    })
+    });
 
   } catch (error) {
     return res.status(500).json({
-      success : false,
-      message : "Internal Server Error",
-      error : error.message
-    })
+      success: false,
+      message: "Internal Server Error",
+      error: error.message
+    });
   }
-}
+};
+
 
 const getAllActiveLabs = async (req, res) => {
   try {
@@ -4495,7 +4478,15 @@ const getLabById = async (req, res) => {
       });
     }
 
-    const getQuery = `SELECT * FROM labs WHERE id = ?`;
+    const getQuery = `
+      SELECT 
+        l.*, 
+        COUNT(lr.lab_id) AS assigned_count
+      FROM labs l
+      LEFT JOIN lab_requests lr ON l.id = lr.lab_id
+      WHERE l.id = ?
+      GROUP BY l.id
+    `;
 
     pool.query(getQuery, [labId], (err, result) => {
       if (err) {
@@ -4532,6 +4523,7 @@ const updateLabById = async (req, res) => {
   try {
     const labId = req.params.labId;
     const { lab_name, email, phone, speciality, notes, address } = req.body;
+    const image = req.file ? req.file.filename : null;
 
     if (!labId) {
       return res.status(400).json({
@@ -4560,18 +4552,19 @@ const updateLabById = async (req, res) => {
 
       const existing = getResult[0];
 
-      // Step 2: Prepare updated values (use new value if passed, else keep existing)
+      // Step 2: Prepare updated values
       const updatedLabName = lab_name || existing.lab_name;
       const updatedEmail = email || existing.email;
       const updatedPhone = phone || existing.phone_number;
       const updatedSpeciality = speciality || existing.speciality;
       const updatedNotes = notes || existing.notes;
       const updatedAddress = address || existing.address;
+      const updatedImage = image || existing.image;
 
       // Step 3: Update query
       const updateQuery = `
         UPDATE labs
-        SET lab_name = ?, email = ?, phone_number = ?, speciality = ?, notes = ?, address = ?
+        SET lab_name = ?, email = ?, phone_number = ?, speciality = ?, notes = ?, address = ?, image = ?
         WHERE id = ?
       `;
 
@@ -4584,7 +4577,8 @@ const updateLabById = async (req, res) => {
           updatedSpeciality,
           updatedNotes,
           updatedAddress,
-          labId,
+          updatedImage,
+          labId
         ],
         (updateErr, updateResult) => {
           if (updateErr) {
