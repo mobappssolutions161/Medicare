@@ -402,7 +402,7 @@ const addDoctorDetails = async (req, res) => {
 
           return res.status(201).json({
             success: true,
-            message: 'Doctor details added successfully'
+            message: `${role} details added successfully`
           });
         });
       });

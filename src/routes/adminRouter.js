@@ -80,6 +80,10 @@ router.delete("/deleteDrug/:drugId", adminController.deleteDrug)
 router.post("/addServices", adminController.addServices)
 router.get("/getServices", adminController.getServices)
 
+router.post("/addLabService", adminController.addLabService)
+router.get("/getAllLabServices", adminController.getAllLabServices)
+router.delete("/deleteLabService/:serviceId", adminController.deleteLabService)
+
 router.post("/addLabs",upload.single("image"), adminController.addLabs)
 router.get("/getAllLabs", adminController.getAllLabs)
 router.get("/getAllActiveLabs", adminController.getAllActiveLabs)

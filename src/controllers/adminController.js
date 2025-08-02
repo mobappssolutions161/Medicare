@@ -39,6 +39,7 @@ const getAllUsers = async (req, res) => {
         users.role,
         users.is_active,
         users.createdAt,
+        doctors.id as doctorId,
         doctors.fullName,
         doctors.phoneNumber,
         doctors.shortName,
@@ -57,6 +58,7 @@ const getAllUsers = async (req, res) => {
     `;
 
     pool.query(query, (error, result) => {
+      console.log(result)
       if (error) {
         return res.status(400).json({
           success: false,
@@ -73,6 +75,7 @@ const getAllUsers = async (req, res) => {
       }
 
       const mappedUsers = result.map(user => ({
+        id : user.doctorId,
         userId: user.userId,
         email: user.email,
         password: user.password,
@@ -87,7 +90,6 @@ const getAllUsers = async (req, res) => {
         phoneNumber: user.phoneNumber,
         specialty: user.specialty,
         licenseId: user.licenseId,
-        user_id: user.user_id,
         personalPhoto: user.personalPhoto || null,
         shortName: user.shortName,
         prefix: user.prefix,
@@ -253,7 +255,7 @@ const getAllStaff = async (req, res) => {
         doctors.civilId,
         doctors.passport,
         doctors.personalPhoto,
-        doctors.user_id
+        doctors.id as doctorId
       FROM users 
       LEFT JOIN doctors ON doctors.user_id = users.id 
       WHERE users.role IN ("receptionist", "admin") AND users.is_deleted = 0
@@ -269,6 +271,7 @@ const getAllStaff = async (req, res) => {
       }
 
       const staffList = result.map(user => ({
+        id:user.doctorId,
         userId: user.userId,
         email: user.email,
         password: user.password,
@@ -283,7 +286,6 @@ const getAllStaff = async (req, res) => {
         gender: user.gender,
         phoneNumber: user.phoneNumber,
         specialty: user.specialty,
-        user_id: user.user_id,
         personalPhoto: user.personalPhoto || null,
         shortName: user.shortName,
         prefix: user.prefix,
@@ -310,6 +312,9 @@ const getAllNurses = async (req, res) => {
         users.role,
         users.is_active,
         users.createdAt,
+
+        doctors.id AS doctorId,
+        doctors.user_id,
         doctors.fullName,
         doctors.licenseId,
         doctors.phoneNumber,
@@ -320,10 +325,10 @@ const getAllNurses = async (req, res) => {
         doctors.specialty,
         doctors.civilId,
         doctors.passport,
-        doctors.personalPhoto,
-        doctors.user_id
+        doctors.personalPhoto
+
       FROM users 
-      LEFT JOIN doctors ON doctors.user_id = users.id 
+      LEFT JOIN doctors ON doctors.user_id = users.id
       WHERE users.role = "nurse" AND users.is_deleted = 0
     `;
 
@@ -337,12 +342,14 @@ const getAllNurses = async (req, res) => {
       }
 
       const nurseList = result.map(user => ({
+        id: user.doctorId,
         userId: user.userId,
         email: user.email,
         password: user.password,
         role: user.role,
         is_active: user.is_active,
         createdAt: user.createdAt,
+
         fullName: user.fullName,
         licenseId: user.licenseId,
         civilId: user.civilId,
@@ -351,7 +358,6 @@ const getAllNurses = async (req, res) => {
         gender: user.gender,
         phoneNumber: user.phoneNumber,
         specialty: user.specialty,
-        user_id: user.user_id,
         personalPhoto: user.personalPhoto || null,
         shortName: user.shortName,
         prefix: user.prefix,
@@ -364,6 +370,7 @@ const getAllNurses = async (req, res) => {
       });
     });
   } catch (err) {
+    console.error("Error in getAllNurses:", err);
     res.status(500).json({ success: false, message: "Server Error" });
   }
 };
@@ -540,76 +547,105 @@ const changeDoctorStatus = async (req, res) => {
 const changeUserStatus = async (req, res) => {
   try {
     const userId = req.params.userId;
+    const { status } = req.body;
+
+    // Step 1: Validate inputs
     if (!userId) {
       return res.status(400).json({
         success: false,
-        message: "User ID is required",
+        message: "Doctor ID is required",
       });
     }
 
-    const { status } = req.body;
-
-    // Validate status: must be 0 or 1 (as a number)
-    if (status !== 1 && status !== 0) {
+    if (typeof status !== "number" || (status !== 0 && status !== 1)) {
       return res.status(400).json({
         success: false,
         message: "Invalid status value (must be 0 or 1)",
       });
     }
 
-    // Step 1: Check current user status
-    const checkQuery = "SELECT is_active FROM users WHERE id = ?";
-    pool.query(checkQuery, [userId], (err, results) => {
+    // Step 2: Get user_id from doctors table
+    const getUserIdQuery = "SELECT user_id FROM doctors WHERE id = ? LIMIT 1";
+    pool.query(getUserIdQuery, [userId], (err, doctorResult) => {
       if (err) {
+        console.error("Error fetching doctor:", err);
         return res.status(500).json({
           success: false,
-          message: "Error checking user status",
+          message: "Error fetching doctor info",
           error: err.message,
         });
       }
 
-      if (results.length === 0) {
+      if (!doctorResult || doctorResult.length === 0) {
         return res.status(404).json({
           success: false,
-          message: "User not found",
+          message: "Doctor not found",
         });
       }
 
-      const currentStatus = results[0].is_active;
+      const userId = doctorResult[0].user_id;
 
-      if (currentStatus === status) {
-        return res.status(400).json({
-          success: false,
-          message: `User is already ${status === 1 ? "active" : "inactive"}`,
-        });
-      }
-
-      // Step 2: Proceed to update
-      const updateQuery =
-        "UPDATE users SET is_active = ?, updatedAt = NOW() WHERE id = ?";
-      pool.query(updateQuery, [status, userId], (err, result) => {
+      // Step 3: Check current user status
+      const checkQuery = "SELECT is_active FROM users WHERE id = ? LIMIT 1";
+      pool.query(checkQuery, [userId], (err, userResult) => {
         if (err) {
+          console.error("Error checking user status:", err);
           return res.status(500).json({
             success: false,
-            message: "Error updating status",
+            message: "Error checking user status",
             error: err.message,
           });
         }
 
-        return res.status(200).json({
-          success: true,
-          message: `User status changed to ${status === 1 ? "active" : "inactive"}`,
+        if (!userResult || userResult.length === 0) {
+          return res.status(404).json({
+            success: false,
+            message: "Associated user not found",
+          });
+        }
+
+        const currentStatus = userResult[0].is_active;
+
+        if (currentStatus === status) {
+          return res.status(400).json({
+            success: false,
+            message: `User is already ${status === 1 ? "active" : "inactive"}`,
+          });
+        }
+
+        // Step 4: Update is_active in users table
+        const updateQuery = `
+          UPDATE users 
+          SET is_active = ?, updatedAt = NOW() 
+          WHERE id = ? LIMIT 1
+        `;
+        pool.query(updateQuery, [status, userId], (err, updateResult) => {
+          if (err) {
+            console.error("Error updating user status:", err);
+            return res.status(500).json({
+              success: false,
+              message: "Error updating user status",
+              error: err.message,
+            });
+          }
+
+          return res.status(200).json({
+            success: true,
+            message: `User status changed to ${status === 1 ? "active" : "inactive"}`,
+          });
         });
       });
     });
   } catch (error) {
+    console.error("Exception in changeUserStatusByDoctorId:", error);
     return res.status(500).json({
       success: false,
       message: "Internal Server Error",
-      error_message: error.message,
+      error: error.message,
     });
   }
 };
+
 
 const softDeleteUser = async (req, res) => {
   try {
@@ -618,46 +654,76 @@ const softDeleteUser = async (req, res) => {
     if (!userId) {
       return res.status(400).json({
         success: false,
-        message: "User ID is required",
+        message: "Doctor ID is required",
       });
     }
 
-    const query =
-      "UPDATE users SET is_deleted = 1 WHERE id = ? AND is_deleted = 0";
-
-    pool.query(query, [userId], (err, result) => {
+    // Step 1: Get user_id from doctors table
+    const getUserIdQuery = "SELECT user_id FROM doctors WHERE id = ?";
+    pool.query(getUserIdQuery, [userId], (err, doctorResult) => {
       if (err) {
+        console.error("Error fetching doctor:", err);
         return res.status(500).json({
           success: false,
-          message: "Error performing soft delete",
+          message: "Error fetching doctor info",
           error: err.message,
         });
       }
 
-      if (result.affectedRows === 0) {
+      if (!doctorResult || doctorResult.length === 0) {
         return res.status(404).json({
           success: false,
-          message: "User not found or already deleted",
+          message: "Doctor not found",
         });
       }
 
-      return res.status(200).json({
-        success: true,
-        message: `User soft deleted successfully`,
+      const userId = doctorResult[0].user_id;
+
+      // Step 2: Soft delete user by setting is_deleted = 1
+      const softDeleteQuery = `
+        UPDATE users 
+        SET is_deleted = 1 
+        WHERE id = ? AND is_deleted = 0 
+        LIMIT 1
+      `;
+
+      pool.query(softDeleteQuery, [userId], (err, result) => {
+        if (err) {
+          console.error("Error updating user:", err);
+          return res.status(500).json({
+            success: false,
+            message: "Error performing soft delete on user",
+            error: err.message,
+          });
+        }
+
+        if (result.affectedRows === 0) {
+          return res.status(404).json({
+            success: false,
+            message: "User already deleted or not found",
+          });
+        }
+
+        return res.status(200).json({
+          success: true,
+          message: "Doctor's user account soft deleted successfully",
+        });
       });
     });
   } catch (error) {
+    console.error("Exception in softDeleteDoctorById:", error);
     return res.status(500).json({
       success: false,
       message: "Internal Server Error",
-      error_message: error.message,
+      error: error.message,
     });
   }
 };
 
+
 const deleteDoctor = async (req, res) => {
   try {
-    const doctorId = req.params.doctorId;
+    const userId = req.params.doctorId;
 
     if (!doctorId) {
       return res.status(400).json({
@@ -686,7 +752,7 @@ const deleteDoctor = async (req, res) => {
 
       const userId = doctorResult[0].user_id;
 
-      // Step 2: Get role from users table using user_id
+      // Step 2: Get user role
       const getUserRoleQuery = "SELECT role FROM users WHERE id = ?";
       pool.query(getUserRoleQuery, [userId], (err, userResult) => {
         if (err) {
@@ -706,9 +772,9 @@ const deleteDoctor = async (req, res) => {
 
         const userRole = userResult[0].role;
 
-        // Step 3: Delete from doctors table
+        // Step 3: Delete doctor
         const deleteDoctorQuery = "DELETE FROM doctors WHERE id = ?";
-        pool.query(deleteDoctorQuery, [doctorId], (err, doctorDeleteResult) => {
+        pool.query(deleteDoctorQuery, [doctorId], (err) => {
           if (err) {
             return res.status(500).json({
               success: false,
@@ -717,9 +783,9 @@ const deleteDoctor = async (req, res) => {
             });
           }
 
-          // Step 4: Delete from users table
+          // Step 4: Delete user
           const deleteUserQuery = "DELETE FROM users WHERE id = ?";
-          pool.query(deleteUserQuery, [userId], (err, userDeleteResult) => {
+          pool.query(deleteUserQuery, [userId], (err) => {
             if (err) {
               return res.status(500).json({
                 success: false,
@@ -737,10 +803,11 @@ const deleteDoctor = async (req, res) => {
       });
     });
   } catch (error) {
+    console.error("Error in deleteDoctor:", error);
     return res.status(500).json({
       success: false,
       message: "Internal Server Error",
-      error_message: error.message,
+      error: error.message,
     });
   }
 };
@@ -2368,15 +2435,21 @@ const doctorAvailability = async (req, res) => {
 
 const getAppointmentsByDate = async (req, res) => {
   try {
-    const { startDate, endDate } = req.body;
+    let { startDate, endDate } = req.body;
+    console.log(req.body);
 
     const isoDateRegex = /^\d{4}-\d{2}-\d{2}$/;
 
-    if (!startDate || !endDate || !isoDateRegex.test(startDate) || !isoDateRegex.test(endDate)) {
+    if (!startDate || !isoDateRegex.test(startDate)) {
       return res.status(400).json({
         success: false,
-        message: "startDate and endDate must be valid YYYY-MM-DD strings",
+        message: "startDate must be a valid YYYY-MM-DD string",
       });
+    }
+
+    // If endDate is not provided or invalid, default to startDate
+    if (!endDate || !isoDateRegex.test(endDate)) {
+      endDate = startDate;
     }
 
     const query = `
@@ -4144,7 +4217,6 @@ const deleteDrug = async (req, res) => {
 const addServices = async (req, res) => {
   try {
     const {
-      serviceCode,
       serviceName,
       description,
       category,
@@ -4162,14 +4234,13 @@ const addServices = async (req, res) => {
     }
 
     const insertQurery = `Insert into services  (
-                              serial_number, serviceCode,serviceName,description,category,durationMinutes,standardCost,secondaryCost,insuranceCost
-                          ) values  (?,?,?,?,?,?,?,?,?)`;
+                              serviceCode,serviceName,description,category,durationMinutes,standardCost,secondaryCost,insuranceCost
+                          ) values  (?,?,?,?,?,?,?,?)`;
 
     const serviceId = `SERVICE${generateRandomNumber(5)}`;
 
     const insertValue = [
       serviceId,
-      serviceCode,
       serviceName,
       description,
       category,
@@ -4190,7 +4261,6 @@ const addServices = async (req, res) => {
       return res.status(201).json({
         success: true,
         message: "Service inserted successfully",
-        data: result,
       });
     });
   } catch (error) {
@@ -4241,6 +4311,122 @@ const getServices = async (req, res) => {
       error: error.message,
     });
   }
+};
+
+const addLabService = async (req, res) => {
+  try {
+    const { category, serviceName } = req.body;
+
+    if (!category || !serviceName) {
+      return res.status(400).json({
+        success: false,
+        message: "Missing required fields: category or serviceName",
+      });
+    }
+
+    const checkQuery = `SELECT * FROM lab_services WHERE category = ? AND serviceName = ?`;
+    pool.query(checkQuery, [category, serviceName], (checkErr, checkResult) => {
+      if (checkErr) {
+        return res.status(500).json({
+          success: false,
+          message: "Error checking for duplicates",
+        });
+      }
+
+      if (checkResult.length > 0) {
+        return res.status(400).json({
+          success: false,
+          message: "Service already exists",
+        });
+      }
+
+      const insertQuery = `
+        INSERT INTO lab_services (category, serviceName)
+        VALUES (?, ?)`;
+
+      pool.query(insertQuery, [category, serviceName], (insertErr, insertResult) => {
+        if (insertErr) {
+          return res.status(500).json({
+            success: false,
+            message: "Error inserting service",
+            error: insertErr.message,
+          });
+        }
+
+        return res.status(201).json({
+          success: true,
+          message: "Service added successfully",
+          data: {
+            serviceId: insertResult.insertId,
+            category,
+            serviceName,
+          },
+        });
+      });
+    });
+  } catch (error) {
+    return res.status(500).json({
+      success: false,
+      message: "Internal Server Error",
+      error: error.message,
+    });
+  }
+};
+
+const getAllLabServices = (req, res) => {
+  const query = "SELECT * FROM lab_services";
+
+  pool.query(query, (err, results) => {
+    if (err) {
+      return res.status(500).json({
+        success: false,
+        message: "Error fetching services",
+        error: err.message,
+      });
+    }
+
+    if (results.length === 0) {
+      return res.status(404).json({
+        success: false,
+        message: "No services found",
+        data: [],
+      });
+    }
+
+    return res.status(200).json({
+      success: true,
+      message: "Services fetched successfully",
+      data: results,
+    });
+  });
+};
+
+const deleteLabService = (req, res) => {
+  const serviceId = req.params.serviceId;
+
+  const deleteQuery = "DELETE FROM lab_services WHERE id = ?";
+
+  pool.query(deleteQuery, [serviceId], (err, result) => {
+    if (err) {
+      return res.status(500).json({
+        success: false,
+        message: "Error deleting service",
+        error: err.message,
+      });
+    }
+
+    if (result.affectedRows === 0) {
+      return res.status(404).json({
+        success: false,
+        message: "Service not found",
+      });
+    }
+
+    return res.status(200).json({
+      success: true,
+      message: "Service deleted successfully",
+    });
+  });
 };
 
 const getNationalitiesList = async (req, res) => {
@@ -5484,6 +5670,9 @@ export default {
   deleteDrug,
   addServices,
   getServices,
+  addLabService,
+  getAllLabServices,
+  deleteLabService,
   getNationalitiesList,
   getDiagnosisList,
   addLabs,
