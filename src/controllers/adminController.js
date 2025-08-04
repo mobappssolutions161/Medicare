@@ -723,7 +723,7 @@ const softDeleteUser = async (req, res) => {
 
 const deleteDoctor = async (req, res) => {
   try {
-    const userId = req.params.doctorId;
+    const doctorId = req.params.doctorId;
 
     if (!doctorId) {
       return res.status(400).json({
@@ -4313,6 +4313,83 @@ const getServices = async (req, res) => {
   }
 };
 
+const updateService = async (req, res) => {
+  try {
+    const id = req.params.id;
+    if (!id) {
+      return res.status(400).json({ success: false, message: "ID is required" });
+    }
+
+    // Step 1: Get existing service
+    const getQuery = `SELECT * FROM services WHERE id = ?`;
+    pool.query(getQuery, [id], (err, results) => {
+      if (err) return res.status(500).json({ success: false, message: "DB error", error: err.message });
+      if (results.length === 0) return res.status(404).json({ success: false, message: "Service not found" });
+
+      const existing = results[0];
+      const {
+        serviceName = existing.serviceName,
+        description = existing.description,
+        category = existing.category,
+        durationMinutes = existing.durationMinutes,
+        standardCost = existing.standardCost,
+        secondaryCost = existing.secondaryCost,
+        insuranceCost = existing.insuranceCost,
+      } = req.body;
+
+      const updateQuery = `
+        UPDATE services SET
+          serviceName = ?, description = ?, category = ?, durationMinutes = ?,
+          standardCost = ?, secondaryCost = ?, insuranceCost = ?
+        WHERE id = ?
+      `;
+
+      const values = [
+        serviceName,
+        description,
+        category,
+        durationMinutes,
+        standardCost,
+        secondaryCost,
+        insuranceCost,
+        id,
+      ];
+
+      pool.query(updateQuery, values, (err2, result) => {
+        if (err2) return res.status(500).json({ success: false, message: "Update error", error: err2.message });
+
+        return res.status(200).json({ success: true, message: "Service updated successfully" });
+      });
+    });
+  } catch (error) {
+    return res.status(500).json({ success: false, message: "Server error", error: error.message });
+  }
+};
+
+const deleteService = async (req, res) => {
+  try {
+    const id = req.params.id;
+
+    if (!id) {
+      return res.status(400).json({ success: false, message: "ID is required" });
+    }
+
+    const deleteQuery = `DELETE FROM services WHERE id = ?`;
+
+    pool.query(deleteQuery, [id], (err, result) => {
+      if (err) return res.status(500).json({ success: false, message: "DB error", error: err.message });
+
+      if (result.affectedRows === 0) {
+        return res.status(404).json({ success: false, message: "Service not found" });
+      }
+
+      return res.status(200).json({ success: true, message: "Service deleted successfully" });
+    });
+  } catch (error) {
+    return res.status(500).json({ success: false, message: "Internal server error", error: error.message });
+  }
+};
+
 const addLabService = async (req, res) => {
   try {
     const { category, serviceName } = req.body;
@@ -4573,7 +4650,6 @@ const addLabs = async (req, res) => {
   }
 };
 
-
 const getAllLabs = async (req, res) => {
   try {
     const getQuery = `
@@ -4615,7 +4691,6 @@ const getAllLabs = async (req, res) => {
     });
   }
 };
-
 
 const getAllActiveLabs = async (req, res) => {
   try {
@@ -5613,6 +5688,297 @@ const deleteLabRequestAttachment = async (req, res) => {
   }
 };
 
+const serviceCategory =  async(req,res)=>{
+  try {
+    const category_name = req.body.category_name
+    if(!category_name){
+      return res.status(400).json({
+        success : false,
+        message : "Category name is required"
+      })
+    }
+
+    const existingQuery= `select * from service_categories where category_name = ?`
+    pool.query(existingQuery,[category_name],(err,existingData)=>{
+        if(err){
+          return res.status(500).json({
+          success : false,
+          message : "Error while checking existing data"
+      })
+    }
+    if (existingData.length>0){
+      return res.status(400).json({
+      success : false,
+      message : "Category name already exist"})
+    }
+
+    const insertQuery = "Insert into service_categories (category_name) values (?)"
+
+    pool.query(insertQuery,[category_name],(err,result)=>{
+      console.log(result)
+      if(err){
+        return res.status(500).json({
+          success : false,
+          message:"Error while inserting in database"
+        })
+      }
+      return res.status(201).json({
+        success : false,
+        message : "Service category added successfully"
+      })
+    })
+    })
+
+  } catch (error) {
+    return res.status(500).json({
+      success : false,
+      message : "Internal Server Error",
+      error : error.message
+    })
+  }
+}
+
+const getAllServiceCategories = (req, res) => {
+  const query = "SELECT * FROM service_categories ORDER BY id DESC";
+
+  pool.query(query, (err, results) => {
+    if (err) {
+      return res.status(500).json({
+        success: false,
+        message: "Failed to fetch categories",
+        error: err.message,
+      });
+    }
+
+    if (results.length === 0) {
+      return res.status(404).json({
+        success: false,
+        message: "No categories found",
+      });
+    }
+
+    return res.status(200).json({
+      success: true,
+      message: "Categories fetched successfully",
+      data: results,
+    });
+  });
+};
+
+const updateServiceCategory = (req, res) => {
+  const categoryId = req.params.categoryId;
+  const { category_name } = req.body;
+
+  if (!category_name) {
+    return res.status(400).json({
+      success: false,
+      message: "Category name is required",
+    });
+  }
+
+  const query = "UPDATE service_categories SET category_name = ? WHERE id = ?";
+
+  pool.query(query, [category_name, categoryId], (err, result) => {
+    if (err) {
+      return res.status(500).json({
+        success: false,
+        message: "Failed to update category",
+      });
+    }
+
+    if (result.affectedRows === 0) {
+      return res.status(404).json({
+        success: false,
+        message: "Category not found",
+      });
+    }
+
+    return res.status(200).json({
+      success: true,
+      message: "Category updated successfully",
+    });
+  });
+};
+
+const deleteServiceCategory = (req, res) => {
+  const categoryId = req.params.categoryId;
+
+  const query = "DELETE FROM service_categories WHERE id = ?";
+
+  pool.query(query, [categoryId], (err, result) => {
+    if (err) {
+      return res.status(500).json({
+        success: false,
+        message: "Failed to delete category",
+      });
+    }
+
+    if (result.affectedRows === 0) {
+      return res.status(404).json({
+        success: false,
+        message: "Category not found",
+      });
+    }
+
+    return res.status(200).json({
+      success: true,
+      message: "Category deleted successfully",
+    });
+  });
+};
+
+const createAllergy = (req, res) => {
+  const { name, description } = req.body;
+
+  if (!name) {
+    return res.status(400).json({
+      success: false,
+      message: "Allergy name is required",
+    });
+  }
+
+  // Step 1: Check if allergy with same name already exists
+  const checkQuery = `SELECT * FROM allergies WHERE name = ?`;
+  pool.query(checkQuery, [name], (err, existing) => {
+    if (err) {
+      return res.status(500).json({
+        success: false,
+        message: "Error checking existing allergy",
+        error: err.message,
+      });
+    }
+
+    if (existing.length > 0) {
+      return res.status(400).json({
+        success: false,
+        message: "Allergy with this name already exists",
+      });
+    }
+
+    // Step 2: Insert new allergy
+    const insertQuery = `
+      INSERT INTO allergies (name, description)
+      VALUES (?, ?)
+    `;
+
+    pool.query(insertQuery, [name, description], (err, result) => {
+      if (err) {
+        return res.status(500).json({
+          success: false,
+          message: "Error inserting new allergy",
+          error: err.message,
+        });
+      }
+
+      return res.status(201).json({
+        success: true,
+        message: "Allergy added successfully",
+        insertId: result.insertId,
+      });
+    });
+  });
+};
+
+const getAllAllergies = (req, res) => {
+  const query = "SELECT * FROM allergies ORDER BY id DESC";
+
+  pool.query(query, (err, results) => {
+    if (err) {
+      return res.status(500).json({
+        success: false,
+        message: "Failed to fetch allergies",
+        error: err.message,
+      });
+    }
+
+    if (results.length === 0) {
+      return res.status(404).json({
+        success: false,
+        message: "No allergies found",
+      });
+    }
+
+    return res.status(200).json({
+      success: true,
+      message: "Allergies fetched successfully",
+      data: results,
+    });
+  });
+};
+
+const updateAllergy = async (req, res) => {
+  try {
+    const { allergyId } = req.params;
+    const { name, description } = req.body;
+
+    // Step 1: Get existing record
+    const getQuery = `SELECT * FROM allergies WHERE id = ?`;
+    pool.query(getQuery, [allergyId], (err, result) => {
+      if (err) {
+        return res.status(500).json({ success: false, message: "Database error" });
+      }
+
+      if (result.length === 0) {
+        return res.status(404).json({ success: false, message: "Allergy not found" });
+      }
+
+      const existing = result[0];
+
+      const updatedName = name || existing.name;
+      const updatedDescription = description || existing.description;
+
+      // Step 3: Update query
+      const updateQuery = `
+        UPDATE allergies 
+        SET name = ?, description = ?, updated_at = CURRENT_TIMESTAMP
+        WHERE id = ?
+      `;
+
+      pool.query(updateQuery, [updatedName, updatedDescription, allergyId], (updateErr, updateResult) => {
+        if (updateErr) {
+          return res.status(500).json({ success: false, message: "Update failed",error : updateErr });
+        }
+
+        return res.status(200).json({ success: true, message: "Allergy updated successfully" });
+      });
+    });
+
+  } catch (error) {
+    return res.status(500).json({
+      success: false,
+      message: "Internal Server Error",
+      error: error.message,
+    });
+  }
+};
+
+const deleteAllergy = (req, res) => {
+  const allergyId = req.params.allergyId;
+
+  const deleteQuery = "DELETE FROM allergies WHERE id = ?";
+
+  pool.query(deleteQuery, [allergyId], (err, result) => {
+    if (err) {
+      return res.status(500).json({
+        success: false,
+        message: "Error while deleting allergy",
+      });
+    }
+
+    if (result.affectedRows === 0) {
+      return res.status(404).json({
+        success: false,
+        message: "Allergy not found",
+      });
+    }
+
+    return res.status(200).json({
+      success: true,
+      message: "Allergy deleted successfully",
+    });
+  });
+};
+
 export default {
   getAllUsers,
   changeUserStatus,
@@ -5670,6 +6036,8 @@ export default {
   deleteDrug,
   addServices,
   getServices,
+  updateService,
+  deleteService,
   addLabService,
   getAllLabServices,
   deleteLabService,
@@ -5692,6 +6060,14 @@ export default {
   addLabRequestAttachment,
   updateLabRequestAttachment,
   getLabRequestAttachmentsByLabRequestId,
-  deleteLabRequestAttachment
+  deleteLabRequestAttachment,
+  serviceCategory,
+  getAllServiceCategories,
+  updateServiceCategory,
+  deleteServiceCategory,
+  createAllergy,
+getAllAllergies,
+updateAllergy,
+deleteAllergy
 };
 

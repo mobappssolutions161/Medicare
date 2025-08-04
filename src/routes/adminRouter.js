@@ -79,6 +79,8 @@ router.delete("/deleteDrug/:drugId", adminController.deleteDrug)
 
 router.post("/addServices", adminController.addServices)
 router.get("/getServices", adminController.getServices)
+router.put("/updateService/:id",adminController.updateService)
+router.delete("/deleteService/:id", adminController.deleteService)
 
 router.post("/addLabService", adminController.addLabService)
 router.get("/getAllLabServices", adminController.getAllLabServices)
@@ -103,5 +105,15 @@ router.post("/addLabRequestAttachment/:lab_request_id",upload.single('file'),adm
 router.post("/updateLabRequestAttachment/:attachment_id",upload.single('file'),adminController.updateLabRequestAttachment)
 router.get("/getLabRequestAttachmentsByLabRequestId/:labRequestId",adminController.getLabRequestAttachmentsByLabRequestId)
 router.delete("/deleteLabRequestAttachment/:attachment_id",adminController.deleteLabRequestAttachment)
+
+router.post("/serviceCategory",adminController.serviceCategory)
+router.get("/getAllServiceCategories", adminController.getAllServiceCategories)
+router.put("/updateServiceCategory/:categoryId",adminController.updateServiceCategory)
+router.delete("/deleteServiceCategory/:categoryId", adminController.deleteServiceCategory)
+
+router.post("/createAllergy",adminController.createAllergy)
+router.get("/getAllAllergies", adminController.getAllAllergies)
+router.put("/updateAllergy/:allergyId",adminController.updateAllergy)
+router.delete("/deleteAllergy/:allergyId", adminController.deleteAllergy)
 
 export default router;
