@@ -4225,6 +4225,8 @@ const addServices = async (req, res) => {
       secondaryCost,
       insuranceCost,
     } = req.body;
+    console.log(req.body);
+    
     if (!serviceName || !category || !durationMinutes) {
       return res.status(400).json({
         success: false,
@@ -4276,20 +4278,26 @@ const getServices = async (req, res) => {
   try {
     const getQuery = `
       SELECT 
-        id,
-        serviceCode AS code,
-        serviceName AS name,
-        description AS details,
-        category AS type,
-        durationMinutes AS duration,
-        standardCost AS standard_price,
-        secondaryCost AS secondary_price,
-        insuranceCost AS insurance_price
+        s.id,
+        s.serviceCode AS code,
+        s.serviceName AS name,
+        s.description,
+
+        s.category AS categoryId, -- from services
+        sc.category_name AS categoryName, -- from service_categories
+
+        s.durationMinutes AS duration,
+        s.standardCost AS standard_price,
+        s.secondaryCost AS secondary_price,
+        s.insuranceCost AS insurance_price
+
       FROM 
-        services
+        services s
+      LEFT JOIN 
+        service_categories sc ON s.category = sc.id
     `;
 
-    await pool.query(getQuery, (err, results) => {
+    pool.query(getQuery, (err, results) => {
       if (err) {
         return res.status(500).json({
           success: false,
@@ -4312,6 +4320,8 @@ const getServices = async (req, res) => {
     });
   }
 };
+
+
 
 const updateService = async (req, res) => {
   try {
@@ -5002,25 +5012,36 @@ const addLabRequest = async (req, res) => {
       doctor_id,
       title,
       description,
+      serviceIds, // Array of IDs: [1, 2, 3]
       sent_by,
     } = req.body;
 
-    if (!patient_id || !lab_id || !doctor_id || !title || !sent_by) {
+    if (
+      !patient_id ||
+      !lab_id ||
+      !doctor_id ||
+      !title ||
+      !sent_by ||
+      !Array.isArray(serviceIds) ||
+      serviceIds.length === 0
+    ) {
       return res.status(400).json({
         success: false,
-        message: "Missing required fields.",
+        message: "Missing required fields or serviceIds must be a non-empty array.",
       });
     }
 
+    const serviceIdsStr = serviceIds.join(','); // Convert array to comma-separated string
+
     const insertRequestQuery = `
       INSERT INTO lab_requests 
-        (patient_id, lab_id, doctor_id, title, description, sent_by, status_updated_at)
-      VALUES (?, ?, ?, ?, ?, ?, NOW())
+        (patient_id, lab_id, doctor_id, title, description, sent_by, service_ids, status_updated_at)
+      VALUES (?, ?, ?, ?, ?, ?, ?, NOW())
     `;
 
     pool.query(
       insertRequestQuery,
-      [patient_id, lab_id, doctor_id, title, description, sent_by],
+      [patient_id, lab_id, doctor_id, title, description, sent_by, serviceIdsStr],
       (err, result) => {
         if (err) {
           return res.status(500).json({
@@ -5043,7 +5064,7 @@ const addLabRequest = async (req, res) => {
   }
 };
 
-//  Helper to send response using created_at for date/time
+// Helper to send structured response
 
 const sendFinalResponse = (res, labRequestId) => {
   const query = `
@@ -5072,7 +5093,7 @@ const sendFinalResponse = (res, labRequestId) => {
     if (fetchErr) {
       return res.status(500).json({
         success: false,
-        message: "Lab request created but response failed",
+        message: "Lab request created but response fetch failed",
         error: fetchErr.message,
       });
     }
@@ -5152,7 +5173,7 @@ const updateLabRequestStatus = (req, res) => {
   const { requestId } = req.params;
   const { status } = req.body;
 
-  const allowedStatuses = ["Pending", "Received", "Result","Cancelled"];
+  const allowedStatuses = ["Pending", "Received", "Cancelled"]; // Removed "Result"
 
   if (!requestId || !status) {
     return res.status(400).json({
@@ -5168,13 +5189,25 @@ const updateLabRequestStatus = (req, res) => {
     });
   }
 
+  // Build dynamic update query
+  let updateFields = `status = ?, status_updated_at = NOW()`;
+  let updateValues = [status];
+
+  if (status === "Pending") {
+    updateFields += `, pending_at = NOW()`;
+  } else if (status === "Received") {
+    updateFields += `, received_at = NOW()`;
+  }
+
+  updateValues.push(requestId);
+
   const updateQuery = `
     UPDATE lab_requests
-    SET status = ?, status_updated_at = NOW()
+    SET ${updateFields}
     WHERE id = ?
   `;
 
-  pool.query(updateQuery, [status, requestId], (err, result) => {
+  pool.query(updateQuery, updateValues, (err, result) => {
     if (err) {
       return res.status(500).json({
         success: false,
@@ -5223,7 +5256,9 @@ const getLabRequestsByStatus = (req, res) => {
       d.fullName AS doctor_name,
       l.lab_name,
       lr.sent_by,
-      lr.status
+      lr.status,
+      lr.pending_at,
+      lr.received_at
     FROM lab_requests lr
     JOIN patients p ON lr.patient_id = p.id
     JOIN doctors d ON lr.doctor_id = d.id
@@ -5261,14 +5296,7 @@ const getLabRequestsByStatus = (req, res) => {
 const getLabRequestById = (req, res) => {
   const { id } = req.params;
 
-  if (!id || isNaN(id)) {
-    return res.status(400).json({
-      success: false,
-      message: "Invalid or missing lab request ID",
-    });
-  }
-
-  const query = `
+  const labRequestQuery = `
     SELECT
       lr.id AS request_id,
       lr.title,
@@ -5281,7 +5309,10 @@ const getLabRequestById = (req, res) => {
       d.fullName AS doctor_name,
       l.lab_name,
       lr.sent_by,
-      lr.status
+      lr.status,
+      lr.pending_at,
+      lr.received_at,
+      lr.service_Ids
     FROM lab_requests lr
     JOIN patients p ON lr.patient_id = p.id
     JOIN doctors d ON lr.doctor_id = d.id
@@ -5289,9 +5320,8 @@ const getLabRequestById = (req, res) => {
     WHERE lr.id = ?
   `;
 
-  pool.query(query, [id], (err, results) => {
+  pool.query(labRequestQuery, [id], (err, results) => {
     if (err) {
-      console.error("SQL Error:", err);
       return res.status(500).json({
         success: false,
         message: "Failed to retrieve lab request",
@@ -5306,13 +5336,59 @@ const getLabRequestById = (req, res) => {
       });
     }
 
-    return res.status(200).json({
-      success: true,
-      message: `Lab request with ID '${id}' retrieved successfully`,
-      data: results[0], // Only one result expected
+    const request = results[0];
+
+    const serviceIds = request.service_Ids
+      ? request.service_Ids.split(",").map(id => parseInt(id.trim())).filter(id => !isNaN(id))
+      : [];
+
+    // If no services found, return directly
+    if (serviceIds.length === 0) {
+      return res.status(200).json({
+        success: true,
+        message: `Lab request with ID '${id}' retrieved successfully`,
+        data: {
+          ...request,
+          services: [],
+        },
+      });
+    }
+
+    const serviceQuery = `
+      SELECT id, serviceName, category FROM lab_services WHERE id IN (?)
+    `;
+
+    pool.query(serviceQuery, [serviceIds], (err2, serviceResults) => {
+      if (err2) {
+        return res.status(500).json({
+          success: false,
+          message: "Failed to fetch service details",
+          error: err2.message,
+        });
+      }
+
+      const finalResponse = {
+        ...request,
+        services: serviceResults.map(s => ({
+          serviceId : s.id,
+          serviceName: s.serviceName,
+          category: s.category
+        }))
+      };
+
+      delete finalResponse.serviceIds; // Optional: remove raw serviceIds if you don't want to return them
+
+      return res.status(200).json({
+        success: true,
+        message: `Lab request with ID '${id}' retrieved successfully`,
+        data: finalResponse,
+      });
     });
   });
 };
+
+
+
 
 const deleteLabRequest = (req, res) => {
   const { id } = req.params;
