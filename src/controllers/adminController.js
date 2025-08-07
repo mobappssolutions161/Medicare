@@ -1263,6 +1263,21 @@ const updatePatient = async (req, res) => {
       });
     }
 
+    // Helper function to calculate age
+    const calculateAge = (dob) => {
+      const birthDate = new Date(dob);
+      const today = new Date();
+
+      let age = today.getFullYear() - birthDate.getFullYear();
+      const m = today.getMonth() - birthDate.getMonth();
+
+      if (m < 0 || (m === 0 && today.getDate() < birthDate.getDate())) {
+        age--;
+      }
+
+      return age;
+    };
+
     // Fetch existing patient data
     const getQuery = `SELECT * FROM patients WHERE id = ?`;
     pool.query(getQuery, [patientId], (getErr, getResults) => {
@@ -1284,12 +1299,16 @@ const updatePatient = async (req, res) => {
       const passportCopy =
         req.files?.passportCopy?.[0]?.filename || existing.passport_copy;
 
+      const dateOfBirth = req.body.dateOfBirth || existing.dateOfBirth;
+      const age = calculateAge(dateOfBirth);
+
       const updatedFields = {
         firstName: req.body.firstName || existing.firstName,
         middleName: req.body.middleName || existing.middleName,
         lastName: req.body.lastName || existing.lastName,
         profileImage,
-        dateOfBirth: req.body.dateOfBirth || existing.dateOfBirth,
+        dateOfBirth,
+        age,
         gender: req.body.gender || existing.gender,
         nationality: req.body.nationality || existing.nationality,
         civilIdNumber: req.body.civilIdNumber || existing.civilIdNumber,
@@ -1311,7 +1330,7 @@ const updatePatient = async (req, res) => {
 
       const updateQuery = `
         UPDATE patients SET
-          firstName = ?, middleName = ?, lastName = ?, profileImage = ?, dateOfBirth = ?, gender = ?,
+          firstName = ?, middleName = ?, lastName = ?, profileImage = ?, dateOfBirth = ?, age = ?, gender = ?,
           nationality = ?, civilIdNumber = ?, passportNumber = ?, mobileNumber = ?, email = ?,
           address = ?, CPR_scan_doc = ?, passport_copy = ?, fileOpenedDate = ?, firstVisitDate = ?, 
           defaultDoctorId = ?, emContactName = ?, emContactRelation = ?, emContactPhone1 = ?, emContactPhone2 = ?
@@ -1324,6 +1343,7 @@ const updatePatient = async (req, res) => {
         updatedFields.lastName,
         updatedFields.profileImage,
         updatedFields.dateOfBirth,
+        updatedFields.age,
         updatedFields.gender,
         updatedFields.nationality,
         updatedFields.civilIdNumber,
@@ -1901,7 +1921,7 @@ const getUpcomingAppointment = async (req, res) => {
       FROM appointments a
       JOIN patients p ON a.patientId = p.id
       WHERE 
-        TIMESTAMP(DATE(a.appointmentDate), a.startTime) >= DATE_ADD(CURDATE(), INTERVAL 1 DAY)
+      TIMESTAMP(DATE(a.appointmentDate), a.startTime) >= CURDATE() + INTERVAL 1 DAY
         AND a.status = 'Confirmed'
       ORDER BY TIMESTAMP(DATE(a.appointmentDate), a.startTime) ASC
     `;
@@ -1916,7 +1936,7 @@ const getUpcomingAppointment = async (req, res) => {
     if (!rows || rows.length === 0) {
       return res.status(404).json({
         success: false,
-        message: "No upcoming confirmed appointments from tomorrow onwards",
+        message: "No upcoming confirmed appointments from now onwards",
       });
     }
 
@@ -1935,7 +1955,7 @@ const getUpcomingAppointment = async (req, res) => {
 
     return res.status(200).json({
       success: true,
-      message: "Upcoming confirmed appointments from tomorrow fetched successfully",
+      message: "Upcoming confirmed appointments from now fetched successfully",
       data: appointments,
     });
 
@@ -2906,10 +2926,10 @@ const recordPatientVitals = async (req, res) => {
 console.log(req.body);
 
     // Step 1: Validate required fields
-    if (!patient_id || !recorded_at || blood_pressure_systolic == null || blood_pressure_diastolic == null || weight == null || height == null) {
+    if (!patient_id || !recorded_at || blood_pressure_systolic === null || blood_pressure_diastolic === null || weight === null || height === null || !bp_position) {
       return res.status(400).json({
         success: false,
-        message: "Missing required fields: patient_id, recorded_at, blood pressure, weight, and height are required.",
+        message: "Missing required fields: patient id , recorded at , blood pressure , weight , bp position and height are required.",
       });
     }
 
@@ -4321,8 +4341,6 @@ const getServices = async (req, res) => {
   }
 };
 
-
-
 const updateService = async (req, res) => {
   try {
     const id = req.params.id;
@@ -5387,9 +5405,6 @@ const getLabRequestById = (req, res) => {
   });
 };
 
-
-
-
 const deleteLabRequest = (req, res) => {
   const { id } = req.params;
 
@@ -6055,6 +6070,793 @@ const deleteAllergy = (req, res) => {
   });
 };
 
+const addComplaint = async (req, res) => {
+  const { complaints } = req.body;
+
+  if (!complaints) {
+    return res.status(400).json({ success: false, message: "Complaint is required" });
+  }
+
+  // Check if the complaint already exists
+  const checkQuery = `SELECT * FROM chief_complaints WHERE complaints = ?`;
+  pool.query(checkQuery, [complaints], (checkErr, checkResult) => {
+    if (checkErr) {
+      return res.status(500).json({ success: false, message: "DB error", error: checkErr.message });
+    }
+
+    if (checkResult.length > 0) {
+      return res.status(409).json({ success: false, message: "Complaint already exists" });
+    }
+
+    // Insert if not exists
+    const insertQuery = `INSERT INTO chief_complaints (complaints) VALUES (?)`;
+    pool.query(insertQuery, [complaints], (err, result) => {
+      if (err) {
+        return res.status(500).json({ success: false, message: "Insert error", error: err.message });
+      }
+
+      return res.status(201).json({ success: true, message: "Complaint added successfully" });
+    });
+  });
+};
+
+const getAllComplaints = async (req, res) => {
+  const query = `SELECT * FROM chief_complaints ORDER BY id DESC`;
+
+  pool.query(query, (err, results) => {
+    if (err) {
+      return res.status(500).json({
+        success: false,
+        message: "Database error",
+        error: err.message,
+      });
+    }
+
+    if (results.length === 0) {
+      return res.status(404).json({
+        success: false,
+        message: "No complaints found",
+        data: [],
+      });
+    }
+
+    return res.status(200).json({
+      success: true,
+      message: "Complaints fetched successfully",
+      data: results,
+    });
+  });
+};
+
+const updateComplaintById = async (req, res) => {
+  const { id } = req.params;
+  const { complaints } = req.body;
+
+  if (!id || !complaints) {
+    return res.status(400).json({ success: false, message: "ID and complaint are required" });
+  }
+
+  // Check if the new complaint already exists (excluding current one)
+  const checkQuery = `SELECT * FROM chief_complaints WHERE complaints = ? AND id != ?`;
+  pool.query(checkQuery, [complaints, id], (checkErr, checkResult) => {
+    if (checkErr) {
+      return res.status(500).json({ success: false, message: "DB error", error: checkErr.message });
+    }
+
+    if (checkResult.length > 0) {
+      return res.status(409).json({ success: false, message: "Another complaint with this name already exists" });
+    }
+
+    // Proceed to update
+    const updateQuery = `UPDATE chief_complaints SET complaints = ? WHERE id = ?`;
+    pool.query(updateQuery, [complaints, id], (err, result) => {
+      if (err) {
+        return res.status(500).json({ success: false, message: "Update error", error: err.message });
+      }
+
+      if (result.affectedRows === 0) {
+        return res.status(404).json({ success: false, message: "Complaint not found" });
+      }
+
+      return res.status(200).json({ success: true, message: "Complaint updated successfully" });
+    });
+  });
+};
+
+const deleteComplaintById = async (req, res) => {
+  const { id } = req.params;
+
+  if (!id) {
+    return res.status(400).json({ success: false, message: "ID is required" });
+  }
+
+  const deleteQuery = `DELETE FROM chief_complaints WHERE id = ?`;
+
+  pool.query(deleteQuery, [id], (err, result) => {
+    if (err) {
+      return res.status(500).json({ success: false, message: "Delete error", error: err.message });
+    }
+
+    if (result.affectedRows === 0) {
+      return res.status(404).json({ success: false, message: "Complaint not found" });
+    }
+
+    return res.status(200).json({ success: true, message: "Complaint deleted successfully" });
+  });
+};
+
+const addSpeciality = (req, res) => {
+  const { name } = req.body;
+
+  if (!name) {
+    return res.status(400).json({ success: false, message: "Name is required" });
+  }
+
+  const checkQuery = `SELECT * FROM specialities WHERE name = ?`;
+  pool.query(checkQuery, [name], (err, results) => {
+    if (err) return res.status(500).json({ success: false, message: "Database error", error: err.message });
+    if (results.length > 0) {
+      return res.status(409).json({ success: false, message: "Speciality already exists" });
+    }
+
+    const insertQuery = `INSERT INTO specialities (name) VALUES (?)`;
+    pool.query(insertQuery, [name], (err, result) => {
+      if (err) return res.status(500).json({ success: false, message: "Insert error", error: err.message });
+      return res.status(201).json({ success: true, message: "Speciality added successfully" });
+    });
+  });
+};
+
+const getAllSpecialities = (req, res) => {
+
+  let query = `SELECT * FROM specialities`;
+
+  pool.query(query,(err, results) => {
+    if (err) {
+      return res.status(500).json({
+        success: false,
+        message: "Database error",
+        error: err.message,
+      });
+    }
+
+    if (results.length === 0) {
+      return res.status(200).json({
+        success: true,
+        message: "No complaints found",
+        data: [],
+      });
+    }
+
+    return res.status(200).json({
+      success: true,
+      message: "Complaints fetched successfully",
+      data: results,
+    });
+  });
+};
+
+const updateSpecialityById = (req, res) => {
+  const id = req.params.id;
+  const { name } = req.body;
+
+  if (!id) return res.status(400).json({ success: false, message: "ID is required" });
+
+  const fetchQuery = `SELECT * FROM specialities WHERE id = ?`;
+  pool.query(fetchQuery, [id], (err, existingData) => {
+    if (err) return res.status(500).json({ success: false, message: "Fetch error", error: err.message });
+
+    if (existingData.length === 0) {
+      return res.status(404).json({ success: false, message: "Speciality not found" });
+    }
+
+    const updatedName = name || existingData[0].name;
+
+    const updateQuery = `UPDATE specialities SET name = ?, updated_at = CURRENT_TIMESTAMP WHERE id = ?`;
+    pool.query(updateQuery, [updatedName, id], (err, result) => {
+      if (err) return res.status(500).json({ success: false, message: "Update failed", error: err.message });
+
+      return res.status(200).json({ success: true, message: "Speciality updated successfully" });
+    });
+  });
+};
+
+const deleteSpecialityById = (req, res) => {
+  const id = req.params.id;
+
+  if (!id) return res.status(400).json({ success: false, message: "ID is required" });
+
+  const checkQuery = `SELECT * FROM specialities WHERE id = ?`;
+  pool.query(checkQuery, [id], (err, results) => {
+    if (err) return res.status(500).json({ success: false, message: "Database error", error: err.message });
+
+    if (results.length === 0) {
+      return res.status(404).json({ success: false, message: "Speciality not found" });
+    }
+
+    const deleteQuery = `DELETE FROM specialities WHERE id = ?`;
+    pool.query(deleteQuery, [id], (err, result) => {
+      if (err) return res.status(500).json({ success: false, message: "Delete error", error: err.message });
+
+      return res.status(200).json({ success: true, message: "Speciality deleted successfully" });
+    });
+  });
+};
+
+const searchComplaints = (req, res) => {
+  const { text } = req.query;
+
+  if (!text || text.trim() === "") {
+    return res.status(400).json({
+      success: false,
+      message: "Search text is required",
+    });
+  }
+
+  const searchQuery = `
+    SELECT * FROM chief_complaints 
+    WHERE LOWER(complaints) LIKE CONCAT('%', LOWER(?), '%') 
+  `;
+
+  pool.query(searchQuery, [text], (err, results) => {
+    if (err) {
+      return res.status(500).json({
+        success: false,
+        message: "Database error",
+        error: err.message,
+      });
+    }
+
+    if (results.length === 0) {
+      return res.status(200).json({
+        success: true,
+        message: "No complaints found",
+        data: [],
+      });
+    }
+
+    return res.status(200).json({
+      success: true,
+      message: "Complaints fetched successfully",
+      data: results,
+    });
+  });
+};
+
+const addPatientMedicals = async (req, res) => {
+  try {
+    const {
+      chief_complaint,
+      history_of_present_illness,
+      history_of_past_illness,
+      examination_general,
+      examination_systemic,
+      examination_local,
+      treatment_plan,
+      advises,
+      extra_notes,
+      pain_assessment
+    } = req.body;
+
+    const patient_id = req.params.patient_id;
+
+    // Step 1: Get today's date in YYYY-MM-DD
+    const today = new Date().toISOString().split("T")[0];
+
+    // Step 2: Query latest patient_vitals for this patient and today's date
+    pool.query(
+  `SELECT id FROM patient_vitals WHERE patient_id = ? AND DATE(recorded_at) = ? ORDER BY recorded_at DESC LIMIT 1`,
+  [patient_id, today],
+  (err, vitals) => {
+    if (err) {
+      return res.status(500).json({
+        success: false,
+        message: "Error fetching vitals",
+        error: err.message
+      });
+    }
+
+    if (vitals.length === 0) {
+      return res.status(404).json({
+        success: false,
+        message: `No vitals found for patient_id=${patient_id} on date=${today}`
+      });
+    }
+
+    const patient_vital_id = vitals[0].id;
+
+    // Now insert the record into patient_all_medicals
+    const insertQuery = `
+      INSERT INTO patient_all_medicals (
+        patient_id,
+        chief_complaint,
+        history_of_present_illness,
+        history_of_past_illness,
+        examination_general,
+        examination_systemic,
+        examination_local,
+        treatment_plan,
+        advises,
+        extra_notes,
+        pain_assessment,
+        patient_vital,
+        created_at,
+        updated_at
+      ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, NOW(), NOW())
+    `;
+
+    const {
+      chief_complaint,
+      history_of_present_illness,
+      history_of_past_illness,
+      examination_general,
+      examination_systemic,
+      examination_local,
+      treatment_plan,
+      advises,
+      extra_notes,
+      pain_assessment
+    } = req.body;
+
+    const values = [
+      patient_id,
+      chief_complaint,
+      history_of_present_illness,
+      history_of_past_illness,
+      examination_general,
+      examination_systemic,
+      examination_local,
+      treatment_plan,
+      advises,
+      extra_notes,
+      pain_assessment,
+      patient_vital_id
+    ];
+
+    pool.query(insertQuery, values, (err2, result) => {
+      if (err2) {
+        return res.status(500).json({
+          success: false,
+          message: "Insert failed",
+          error: err2.message
+        });
+      }
+
+      return res.status(200).json({
+        success: true,
+        message: "Patient medicals added successfully",
+      });
+    });
+  }
+);
+  } catch (err) {
+    console.error("Insert error:", err);
+    return res.status(500).json({
+      success: false,
+      message: "Something went wrong",
+      error: err.message
+    });
+  }
+};
+
+const getMedicalDataWithVitals = (req, res) => {
+  const { patient_id } = req.params;
+
+  if (!patient_id) {
+    return res.status(400).json({
+      success: false,
+      message: "Patient ID is required",
+    });
+  }
+
+  const medicalQuery = `
+    SELECT pam.*, 
+           pv.id AS vitals_id,
+           pv.gender, pv.age, pv.doctor_id, pv.recorded_at, pv.blood_pressure,
+           pv.respiratory_rate, pv.pulse, pv.spo2, pv.rbs_mg, pv.rbs_nmol, pv.bp_position,
+           pv.temperature, pv.weight, pv.height, pv.bmi, pv.risk_of_fall, pv.urgency, pv.notes, pv.nurse
+    FROM patient_all_medicals pam
+    LEFT JOIN patient_vitals pv ON pam.patient_vital = pv.id
+    WHERE pam.patient_id = ? AND DATE(pam.created_at) = CURDATE()
+    ORDER BY pam.created_at DESC LIMIT 1
+  `;
+
+  pool.query(medicalQuery, [patient_id], (err, results) => {
+    if (err) {
+      return res.status(500).json({ success: false, message: "Error fetching medical record", error: err.message });
+    }
+
+    if (results.length === 0) {
+      return res.status(404).json({ success: false, message: "No medical record found for today" });
+    }
+
+    const row = results[0];
+    const medical_id = row.id;
+
+    const {
+      vitals_id, gender, age, doctor_id, recorded_at, blood_pressure,
+      respiratory_rate, pulse, spo2, rbs_mg, rbs_nmol, bp_position,
+      temperature, weight, height, bmi, risk_of_fall, urgency, notes, nurse,
+      ...medicalData
+    } = row;
+
+    const vitals = {
+      id: vitals_id,
+      gender,
+      age,
+      doctor_id,
+      recorded_at,
+      blood_pressure,
+      respiratory_rate,
+      pulse,
+      spo2,
+      rbs_mg,
+      rbs_nmol,
+      bp_position,
+      temperature,
+      weight,
+      height,
+      bmi,
+      risk_of_fall,
+      urgency,
+      notes,
+      nurse
+    };
+
+    const diagnosisQuery = `SELECT * FROM diagnosis WHERE medical_id = ?`;
+    const prescriptionQuery = `SELECT * FROM prescriptions WHERE medical_id = ?`;
+    const allergyQuery = `SELECT * FROM patient_allergies WHERE medical_id = ?`;
+    const chronicIllnessQuery = `SELECT * FROM chronic_illness WHERE medical_id = ?`;
+
+    pool.query(diagnosisQuery, [medical_id], (err1, diagnosis) => {
+      if (err1) return res.status(500).json({ success: false, message: "Error fetching diagnosis", error: err1.message });
+
+      pool.query(prescriptionQuery, [medical_id], async (err2, prescriptions) => {
+        if (err2) return res.status(500).json({ success: false, message: "Error fetching prescriptions", error: err2.message });
+
+        // For each prescription, fetch its rx_list entries
+        const enrichedPrescriptions = await Promise.all(prescriptions.map(prescription => {
+          return new Promise((resolve, reject) => {
+            const rxQuery = `SELECT * FROM rx_list WHERE id = ?`;
+            pool.query(rxQuery, [prescription.prescription_id], (errRx, rxItems) => {
+              if (errRx) return reject(errRx);
+              resolve({ ...prescription, rx_list: rxItems });
+            });
+          });
+        }));
+
+        console.log(enrichedPrescriptions[1]);
+        
+        pool.query(allergyQuery, [medical_id], (err3, allergies) => {
+          if (err3) return res.status(500).json({ success: false, message: "Error fetching allergies", error: err3.message });
+
+          pool.query(chronicIllnessQuery, [medical_id], (err4, chronicIllnesses) => {
+            if (err4) return res.status(500).json({ success: false, message: "Error fetching chronic illnesses", error: err4.message });
+
+            return res.status(200).json({
+              success: true,
+              message: `Patient medical data fetched successfully for ${new Date().toLocaleDateString()}`,
+              data: {
+                ...medicalData,
+                vitals,
+                diagnosis,
+                prescriptions: enrichedPrescriptions,
+                allergies,
+                chronic_illnesses: chronicIllnesses
+              }
+            });
+          });
+        });
+      });
+    });
+  });
+};
+
+
+
+const addXrayReport = (req, res) => {
+  const {
+    title,
+    description,
+    medical_id 
+  } = req.body;
+
+  const attachment = req.file ? req.file.filename : null;
+
+  // 🔍 Step 1: Validate required fields
+  if (!title || !medical_id) {
+    return res.status(400).json({
+      success: false,
+      message: "Missing required fields: title and medical_id are required.",
+    });
+  }
+
+  try {
+    // 🔍 Step 2: Fetch patient_id using medical_id
+    const fetchQuery = `SELECT * FROM patient_all_medicals WHERE id = ?`;
+
+    pool.query(fetchQuery, [medical_id], function (err, result) {
+      console.log(result);
+      
+      if (err) {
+        console.error("Error fetching patient_id:", err);
+        return res.status(500).json({
+          success: false,
+          message: "Database error while fetching patient_id",
+          error: err.message,
+        });
+      }
+
+      if (result.length === 0) {
+        return res.status(404).json({
+          success: false,
+          message: "No record found with this medical_id.",
+        });
+      }
+
+      const patient_id = result[0].patient_id;
+
+      // 💾 Step 3: Insert report into xRay_and_radiology
+      const insertQuery = `
+        INSERT INTO xRay_and_radiology 
+        (title, description, attachment, medical_id, patient_id)
+        VALUES (?, ?, ?, ?, ?)
+      `;
+
+      const values = [
+        title,
+        description || null,
+        attachment,
+        medical_id,
+        patient_id
+      ];
+
+      pool.query(insertQuery, values, function (insertErr, insertResult) {
+        if (insertErr) {
+          console.error("Error inserting report:", insertErr);
+          return res.status(500).json({
+            success: false,
+            message: "Failed to add X-ray/radiology report",
+            error: insertErr.message,
+          });
+        }
+
+        return res.status(201).json({
+          success: true,
+          message: "X-ray/radiology report added successfully",
+          reportId: insertResult.insertId,
+        });
+      });
+    });
+  } catch (error) {
+    console.error("Unexpected error:", error);
+    return res.status(500).json({
+      success: false,
+      message: "Unexpected server error",
+      error: error.message,
+    });
+  }
+}
+
+const addDiagnosis = (req, res)=> {
+  const {
+    diagnosis_text,
+    medical_id
+  } = req.body;
+
+  if (!diagnosis_text || !medical_id) {
+    return res.status(400).json({
+      success: false,
+      message: "Missing required fields: diagnosis_text and medical_id are required.",
+    });
+  }
+
+  try {
+    const fetchQuery = `SELECT * FROM patient_all_medicals WHERE id = ?`;
+
+    pool.query(fetchQuery, [medical_id], function (err, result) {
+      if (err) {
+        console.error("Error fetching patient_id:", err);
+        return res.status(500).json({
+          success: false,
+          message: "Database error while fetching patient_id",
+          error: err.message,
+        });
+      }
+
+      if (result.length === 0) {
+        return res.status(404).json({
+          success: false,
+          message: "No record found with this medical_id.",
+        });
+      }
+
+      const patient_id = result[0].patient_id;
+
+      const insertQuery = `
+        INSERT INTO diagnosis (medical_id, patient_id, diagnosis_text)
+        VALUES (?, ?, ?)
+      `;
+
+      const values = [medical_id, patient_id, diagnosis_text];
+
+      pool.query(insertQuery, values, function (insertErr, insertResult) {
+        if (insertErr) {
+          console.error("Error inserting diagnosis:", insertErr);
+          return res.status(500).json({
+            success: false,
+            message: "Failed to add diagnosis",
+            error: insertErr.message,
+          });
+        }
+
+        return res.status(201).json({
+          success: true,
+          message: "Diagnosis added successfully",
+        });
+      });
+    });
+  } catch (error) {
+    console.error("Unexpected error:", error);
+    return res.status(500).json({
+      success: false,
+      message: "Unexpected server error",
+      error: error.message,
+    });
+  }
+}
+
+const addPrescription = (req, res)=> {
+  const {
+    prescription_id,
+    medical_id
+  } = req.body;
+
+  if (!prescription_id || !medical_id) {
+    return res.status(400).json({
+      success: false,
+      message: "Missing required fields: prescription_text and medical_id are required.",
+    });
+  }
+
+  try {
+    const fetchQuery = `SELECT * FROM patient_all_medicals WHERE id = ?`;
+
+    pool.query(fetchQuery, [medical_id], function (err, result) {
+      if (err) {
+        console.error("Error fetching patient_id:", err);
+        return res.status(500).json({
+          success: false,
+          message: "Database error while fetching patient_id",
+          error: err.message,
+        });
+      }
+
+      if (result.length === 0) {
+        return res.status(404).json({
+          success: false,
+          message: "No record found with this medical_id.",
+        });
+      }
+
+      const patient_id = result[0].patient_id;
+
+      const insertQuery = `
+        INSERT INTO prescription (medical_id, patient_id, prescription_id)
+        VALUES (?, ?, ?)
+      `;
+
+      const values = [medical_id, patient_id, prescription_id];
+
+      pool.query(insertQuery, values, function (insertErr, insertResult) {
+        if (insertErr) {
+          console.error("Error inserting prescription:", insertErr);
+          return res.status(500).json({
+            success: false,
+            message: "Failed to add prescription",
+            error: insertErr.message,
+          });
+        }
+
+        return res.status(201).json({
+          success: true,
+          message: "Prescription added successfully",
+        });
+      });
+    });
+  } catch (error) {
+    console.error("Unexpected error:", error);
+    return res.status(500).json({
+      success: false,
+      message: "Unexpected server error",
+      error: error.message,
+    });
+  }
+}
+
+const addChronicIllness = async (req, res) => {
+  const { medical_id, illness_text } = req.body;
+
+  if (!medical_id || !illness_text) {
+    return res.status(400).json({
+      success: false,
+      message: "medical_id and illness_text are required",
+    });
+  }
+
+  const getPatientQuery = `SELECT patient_id FROM patient_all_medicals WHERE id = ?`;
+
+  pool.query(getPatientQuery, [medical_id], (err, result) => {
+    if (err) {
+      return res.status(500).json({ success: false, message: "Database error", error: err.message });
+    }
+
+    if (result.length === 0) {
+      return res.status(404).json({ success: false, message: "Medical record not found" });
+    }
+
+    const patient_id = result[0].patient_id;
+
+    const insertQuery = `
+      INSERT INTO chronic_illness (medical_id, patient_id, illness_text)
+      VALUES (?, ?, ?)
+    `;
+
+    pool.query(insertQuery, [medical_id, patient_id, illness_text], (insertErr, insertResult) => {
+      if (insertErr) {
+        return res.status(500).json({ success: false, message: "Failed to add chronic illness", error: insertErr.message });
+      }
+
+      return res.status(201).json({
+        success: true,
+        message: "Chronic illness added successfully",
+        chronicId: insertResult.insertId,
+      });
+    });
+  });
+};
+
+const addPatientAllergy = async (req, res) => {
+  const { medical_id, allergy_text } = req.body;
+
+  if (!medical_id || !allergy_text) {
+    return res.status(400).json({
+      success: false,
+      message: "medical_id, allergy_text and status are required",
+    });
+  }
+
+  const getPatientQuery = `SELECT patient_id FROM patient_all_medicals WHERE id = ?`;
+
+  pool.query(getPatientQuery, [medical_id], (err, result) => {
+    if (err) {
+      return res.status(500).json({ success: false, message: "Database error", error: err.message });
+    }
+
+    if (result.length === 0) {
+      return res.status(404).json({ success: false, message: "Medical record not found" });
+    }
+
+    const patient_id = result[0].patient_id;
+
+    const insertQuery = `
+      INSERT INTO patient_allergy (medical_id, patient_id, allergy_text)
+      VALUES (?, ?, ?)
+    `;
+
+    pool.query(insertQuery, [medical_id, patient_id, allergy_text], (insertErr, insertResult) => {
+      if (insertErr) {
+        return res.status(500).json({ success: false, message: "Failed to add allergy", error: insertErr.message });
+      }
+
+      return res.status(201).json({
+        success: true,
+        message: "Allergy added successfully",
+      });
+    });
+  });
+};
+
 export default {
   getAllUsers,
   changeUserStatus,
@@ -6142,8 +6944,25 @@ export default {
   updateServiceCategory,
   deleteServiceCategory,
   createAllergy,
-getAllAllergies,
-updateAllergy,
-deleteAllergy
+  getAllAllergies,
+  updateAllergy,
+  deleteAllergy,
+  addComplaint,
+  getAllComplaints,
+  updateComplaintById,
+  deleteComplaintById,
+  searchComplaints,
+  addSpeciality,
+  getAllSpecialities,
+  updateSpecialityById,
+  deleteSpecialityById,
+  addPatientMedicals ,
+  getMedicalDataWithVitals,
+  addXrayReport,
+  addDiagnosis,
+addPrescription,
+addChronicIllness,
+addPatientAllergy,
+
 };
 

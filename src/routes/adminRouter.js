@@ -116,4 +116,25 @@ router.get("/getAllAllergies", adminController.getAllAllergies)
 router.put("/updateAllergy/:allergyId",adminController.updateAllergy)
 router.delete("/deleteAllergy/:allergyId", adminController.deleteAllergy)
 
+router.post("/addSpeciality", adminController.addSpeciality);
+router.get("/getAllSpecialities", adminController.getAllSpecialities);
+router.put("/updateSpecialityById/:id", adminController.updateSpecialityById); 
+router.delete("/deleteSpecialityById/:id", adminController.deleteSpecialityById);
+
+
+router.post('/addComplaint', adminController.addComplaint);
+router.get('/getAllComplaints', adminController.getAllComplaints);
+router.put('/updateComplaintById/:id', adminController.updateComplaintById);
+router.delete('/deleteComplaintById/:id', adminController.deleteComplaintById);
+router.post('/searchComplaints', adminController.searchComplaints);
+
+router.post('/addPatientMedicals/:patient_id', adminController.addPatientMedicals);
+router.get('/getMedicalDataWithVitals/:patient_id', adminController.getMedicalDataWithVitals);
+
+router.post('/addXrayReport',upload.single("attachment") , adminController.addXrayReport);
+router.post('/addDiagnosis', adminController.addDiagnosis);
+router.post('/addPrescription', adminController.addPrescription);
+router.post('/addChronicIllness', adminController.addChronicIllness);
+router.post('/addPatientAllergy', adminController.addPatientAllergy);
+
 export default router;
