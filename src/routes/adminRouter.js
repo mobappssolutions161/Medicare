@@ -94,7 +94,7 @@ router.put("/updateLabById/:labId", upload.single("image"),adminController.updat
 router.delete("/deleteLabById/:labId", adminController.deleteLabById)
 router.put("/changeLabStatus/:labId", adminController.changeLabStatus)
 
-router.post("/addLabRequest",adminController.addLabRequest)
+router.post("/addLabRequest",upload.single("file"),adminController.addLabRequest)
 router.get("/getLabRequestsByPatient/:patientId",adminController.getLabRequestsByPatient)
 router.post("/updateLabRequestStatus/:requestId",adminController.updateLabRequestStatus)
 router.post("/getLabRequestsByStatus",adminController.getLabRequestsByStatus)

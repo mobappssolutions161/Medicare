@@ -5034,32 +5034,58 @@ const addLabRequest = async (req, res) => {
       sent_by,
     } = req.body;
 
+    // Convert serviceIds to array if coming as string from form-data
+    let serviceArray = serviceIds;
+    if (typeof serviceIds === "string") {
+      try {
+        serviceArray = JSON.parse(serviceIds);
+      } catch {
+        return res.status(400).json({
+          success: false,
+          message: "serviceIds must be a valid JSON array",
+        });
+      }
+    }
+
     if (
       !patient_id ||
       !lab_id ||
       !doctor_id ||
       !title ||
       !sent_by ||
-      !Array.isArray(serviceIds) ||
-      serviceIds.length === 0
+      !Array.isArray(serviceArray) ||
+      serviceArray.length === 0
     ) {
       return res.status(400).json({
         success: false,
-        message: "Missing required fields or serviceIds must be a non-empty array.",
+        message:
+          "Missing required fields or serviceIds must be a non-empty array.",
       });
     }
 
-    const serviceIdsStr = serviceIds.join(','); // Convert array to comma-separated string
+    const serviceIdsStr = serviceArray.join(","); // Convert array to comma-separated string
+
+    // Get uploaded file path if exists
+    const filePath = req.file ? req.file.filename : null;
 
     const insertRequestQuery = `
       INSERT INTO lab_requests 
-        (patient_id, lab_id, doctor_id, title, description, sent_by, service_ids, status_updated_at)
-      VALUES (?, ?, ?, ?, ?, ?, ?, NOW())
+        (patient_id, lab_id, doctor_id, title, description, sent_by, service_ids, file, status_updated_at)
+      VALUES (?, ?, ?, ?, ?, ?, ?, ?, NOW())
     `;
 
     pool.query(
       insertRequestQuery,
-      [patient_id, lab_id, doctor_id, title, description, sent_by, serviceIdsStr],
+      [
+        patient_id,
+        lab_id,
+        doctor_id,
+        title,
+        description,
+        sent_by,
+        serviceIdsStr,
+        filePath,
+      ],
       (err, result) => {
         if (err) {
           return res.status(500).json({
@@ -5150,6 +5176,7 @@ const getLabRequestsByPatient = async (req, res) => {
       d.id AS doctor_id,
       d.fullName AS doctor_name,
       l.lab_name,
+      lr.file,
       lr.sent_by,
       lr.status,
       (
@@ -5250,7 +5277,6 @@ const updateLabRequestStatus = (req, res) => {
 
 const getLabRequestsByStatus = (req, res) => {
   const { status } = req.body;
-  console.log("Requested Status:", status);
 
   const allowedStatuses = ["Not Sent", "Pending", "Received", "Result"];
 
@@ -5273,6 +5299,7 @@ const getLabRequestsByStatus = (req, res) => {
       p.civilIdNumber AS patient_civil_id,
       d.fullName AS doctor_name,
       l.lab_name,
+      lr.file,
       lr.sent_by,
       lr.status,
       lr.pending_at,
@@ -5326,6 +5353,7 @@ const getLabRequestById = (req, res) => {
       p.civilIdNumber AS patient_civil_id,
       d.fullName AS doctor_name,
       l.lab_name,
+      lr.file,
       lr.sent_by,
       lr.status,
       lr.pending_at,
@@ -6551,8 +6579,6 @@ const getMedicalDataWithVitals = (req, res) => {
     });
   });
 };
-
-
 
 const addXrayReport = (req, res) => {
   const {

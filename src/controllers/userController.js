@@ -76,76 +76,91 @@ const userSignup = async (req, res) => {
   }
 };
 
-const userLogin = async (req,res)=>{
+const userLogin = async (req, res) => {
     try {
+        const { email, password } = req.body;
 
-        const {email,password} = req.body
-
-        if(!email){
+        if (!email) {
             return res.status(400).json({
-                success : false,
-                message : "Email required"
-            })
+                success: false,
+                message: "Email required"
+            });
         }
-        if(!password){
+        if (!password) {
             return res.status(400).json({
-                success : false,
-                message : "password required"
-            })
+                success: false,
+                message: "Password required"
+            });
         }
 
-        const query = "Select * from users where email = ? AND is_active = 1 AND is_deleted = 0"
+        const query = "SELECT * FROM users WHERE email = ? AND is_active = 1 AND is_deleted = 0";
 
-        pool.query(query,[email], async (error,result)=>{
-            if(error){
+        pool.query(query, [email], async (error, result) => {
+            if (error) {
                 return res.status(500).json({
                     success: false,
-                    message: "Error While fetching the user Details",
-        });
-            }else{
-                if(result.length === 0){
+                    message: "Error while fetching the user details",
+                });
+            } else {
+                if (result.length === 0) {
                     return res.status(404).json({
-                        success : false,
-                        message : "User not found"
-                    })
-                }else {
-                    const matchPassword = await bcrypt.compare(password,result[0].password)
-                    console.log(matchPassword)
-                    if(!matchPassword){
-                         return res.status(400).json({
-                        success : false,
-                        message : "Password not correct"
-                    })
-                    }else{
-                        const payload = {
-                            id : result[0].id,
-                            email : result[0].email,
-                            role : result[0].role
+                        success: false,
+                        message: "User not found"
+                    });
+                } else {
+                    const matchPassword = await bcrypt.compare(password, result[0].password);
+                    if (!matchPassword) {
+                        return res.status(400).json({
+                            success: false,
+                            message: "Password not correct"
+                        });
+                    } else {
+                        const user = result[0];
+                        let doctorName = null;
 
-                        } 
+                        // Fetch doctor name for any role (if exists)
+                        const doctorQuery = `SELECT * FROM doctors WHERE user_id = ? LIMIT 1`;
+                        pool.query(doctorQuery, [user.id], (err, doctorResult) => {
+                            if (err) {
+                                return res.status(500).json({
+                                    success: false,
+                                    message: "Error fetching doctor's name"
+                                });
+                            }
+                            if (doctorResult.length > 0) {
+                                doctorName = doctorResult[0].fullName;
+                            }
 
-                        const token = jwt.sign(payload,process.env.secret_key,{expiresIn :"24h"})
+                            const payload = {
+                                id: user.id,
+                                email: user.email,
+                                role: user.role
+                            };
 
-                        return res.status(200).json({
-                            success: true,
-                            message: `${result[0].role} login successfully`,
-                            token ,
-                            role : result[0].role
-                        })
+                            const token = jwt.sign(payload, process.env.secret_key, { expiresIn: "24h" });
+
+                            return res.status(200).json({
+                                success: true,
+                                message: `${user.role} login successfully`,
+                                token,
+                                role: user.role,
+                                name: doctorName 
+                            });
+                        });
                     }
                 }
             }
-
-        })
+        });
 
     } catch (error) {
         return res.status(500).json({
-            success : false,
-            message : "Internal Server Error",
-            error  : error.message
-        })
+            success: false,
+            message: "Internal Server Error",
+            error: error.message
+        });
     }
-}
+};
+
 
 const changePassword = async (req, res) => {
   try {
