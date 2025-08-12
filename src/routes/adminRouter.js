@@ -130,6 +130,8 @@ router.post('/searchComplaints', adminController.searchComplaints);
 
 router.post('/addPatientMedicals/:patient_id', adminController.addPatientMedicals);
 router.get('/getMedicalDataWithVitals/:patient_id', adminController.getMedicalDataWithVitals);
+router.get('/getAllMedicalDataByPatient/:patient_id', adminController.getAllMedicalDataByPatient);
+router.post('/getMedicalRecordsByDate/:patient_id', adminController.getMedicalRecordsByDate);
 
 router.post('/addXrayReport',upload.single("attachment") , adminController.addXrayReport);
 router.post('/addDiagnosis', adminController.addDiagnosis);

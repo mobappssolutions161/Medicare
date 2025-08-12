@@ -6535,6 +6535,7 @@ const getMedicalDataWithVitals = (req, res) => {
     const prescriptionQuery = `SELECT * FROM prescriptions WHERE medical_id = ?`;
     const allergyQuery = `SELECT * FROM patient_allergies WHERE medical_id = ?`;
     const chronicIllnessQuery = `SELECT * FROM chronic_illness WHERE medical_id = ?`;
+    const xRayQuery = `SELECT * FROM xray_and_radiology WHERE medical_id = ?`;
 
     pool.query(diagnosisQuery, [medical_id], (err1, diagnosis) => {
       if (err1) return res.status(500).json({ success: false, message: "Error fetching diagnosis", error: err1.message });
@@ -6553,14 +6554,16 @@ const getMedicalDataWithVitals = (req, res) => {
           });
         }));
 
-        console.log(enrichedPrescriptions[1]);
-        
         pool.query(allergyQuery, [medical_id], (err3, allergies) => {
           if (err3) return res.status(500).json({ success: false, message: "Error fetching allergies", error: err3.message });
 
           pool.query(chronicIllnessQuery, [medical_id], (err4, chronicIllnesses) => {
             if (err4) return res.status(500).json({ success: false, message: "Error fetching chronic illnesses", error: err4.message });
-
+            
+            pool.query(xRayQuery, [medical_id], (err5, xRay) => {
+  
+              if (err5) return res.status(500).json({ success: false, message: "Error fetching chronic illnesses", error: err5.message });
+            
             return res.status(200).json({
               success: true,
               message: `Patient medical data fetched successfully for ${new Date().toLocaleDateString()}`,
@@ -6570,13 +6573,238 @@ const getMedicalDataWithVitals = (req, res) => {
                 diagnosis,
                 prescriptions: enrichedPrescriptions,
                 allergies,
-                chronic_illnesses: chronicIllnesses
-              }
+                chronic_illnesses: chronicIllnesses,
+                xRay_and_radiology : xRay
+              }})
             });
           });
         });
       });
     });
+  });
+};
+
+const getAllMedicalDataByPatient = (req, res) => {
+  const { patient_id } = req.params;
+
+  if (!patient_id) {
+    return res.status(400).json({
+      success: false,
+      message: "Patient ID is required",
+    });
+  }
+
+  const medicalQuery = `
+    SELECT pam.*, 
+           pv.id AS vitals_id,
+           pv.gender, pv.age, pv.doctor_id, pv.recorded_at, pv.blood_pressure,
+           pv.respiratory_rate, pv.pulse, pv.spo2, pv.rbs_mg, pv.rbs_nmol, pv.bp_position,
+           pv.temperature, pv.weight, pv.height, pv.bmi, pv.risk_of_fall, pv.urgency, pv.notes, pv.nurse
+    FROM patient_all_medicals pam
+    LEFT JOIN patient_vitals pv ON pam.patient_vital = pv.id
+    WHERE pam.patient_id = ?
+    ORDER BY pam.created_at DESC
+  `;
+
+  pool.query(medicalQuery, [patient_id], async (err, records) => {
+    if (err) {
+      return res.status(500).json({ success: false, message: "Error fetching medical records", error: err.message });
+    }
+
+    if (records.length === 0) {
+      return res.status(404).json({ success: false, message: "No medical records found" });
+    }
+
+    try {
+      const enrichedRecords = await Promise.all(
+        records.map(async (row) => {
+          const medical_id = row.id;
+
+          const {
+            vitals_id, gender, age, doctor_id, recorded_at, blood_pressure,
+            respiratory_rate, pulse, spo2, rbs_mg, rbs_nmol, bp_position,
+            temperature, weight, height, bmi, risk_of_fall, urgency, notes, nurse,
+            ...medicalData
+          } = row;
+
+          const vitals = {
+            id: vitals_id,
+            gender,
+            age,
+            doctor_id,
+            recorded_at,
+            blood_pressure,
+            respiratory_rate,
+            pulse,
+            spo2,
+            rbs_mg,
+            rbs_nmol,
+            bp_position,
+            temperature,
+            weight,
+            height,
+            bmi,
+            risk_of_fall,
+            urgency,
+            notes,
+            nurse
+          };
+
+          // Parallel queries for related tables
+          const [diagnosis, prescriptions, allergies, chronicIllnesses, xRay] = await Promise.all([
+            new Promise((resolve, reject) => pool.query(`SELECT * FROM diagnosis WHERE medical_id = ?`, [medical_id], (e, r) => e ? reject(e) : resolve(r))),
+            new Promise((resolve, reject) => pool.query(`SELECT * FROM prescriptions WHERE medical_id = ?`, [medical_id], (e, r) => e ? reject(e) : resolve(r))),
+            new Promise((resolve, reject) => pool.query(`SELECT * FROM patient_allergies WHERE medical_id = ?`, [medical_id], (e, r) => e ? reject(e) : resolve(r))),
+            new Promise((resolve, reject) => pool.query(`SELECT * FROM chronic_illness WHERE medical_id = ?`, [medical_id], (e, r) => e ? reject(e) : resolve(r))),
+            new Promise((resolve, reject) => pool.query(`SELECT * FROM xray_and_radiology WHERE medical_id = ?`, [medical_id], (e, r) => e ? reject(e) : resolve(r))),
+          ]);
+
+          // Fetch rx_list for each prescription
+          const enrichedPrescriptions = await Promise.all(
+            prescriptions.map((prescription) => {
+              return new Promise((resolve, reject) => {
+                pool.query(`SELECT * FROM rx_list WHERE prescription_id = ?`, [prescription.prescription_id], (errRx, rxItems) => {
+                  if (errRx) return reject(errRx);
+                  resolve({ ...prescription, rx_list: rxItems });
+                });
+              });
+            })
+          );
+
+          return {
+            ...medicalData,
+            vitals,
+            diagnosis,
+            prescriptions: enrichedPrescriptions,
+            allergies,
+            chronic_illnesses: chronicIllnesses,
+            xRay_and_radiology: xRay
+          };
+        })
+      );
+
+      res.status(200).json({
+        success: true,
+        message: `All medical records fetched successfully for patient ${patient_id}`,
+        data: enrichedRecords
+      });
+
+    } catch (error) {
+      res.status(500).json({ success: false, message: "Error enriching medical records", error: error.message });
+    }
+  });
+};
+
+const getMedicalRecordsByDate = (req, res) => {
+  const {patient_id} = req.params
+  const {date } = req.body;
+
+  if (!patient_id || !date) {
+    return res.status(400).json({
+      success: false,
+      message: "Patient ID and date are required",
+    });
+  }
+
+  const medicalQuery = `
+    SELECT pam.*, 
+           pv.id AS vitals_id,
+           pv.gender, pv.age, pv.doctor_id, pv.recorded_at, pv.blood_pressure,
+           pv.respiratory_rate, pv.pulse, pv.spo2, pv.rbs_mg, pv.rbs_nmol, pv.bp_position,
+           pv.temperature, pv.weight, pv.height, pv.bmi, pv.risk_of_fall, pv.urgency, pv.notes, pv.nurse
+    FROM patient_all_medicals pam
+    LEFT JOIN patient_vitals pv ON pam.patient_vital = pv.id
+    WHERE pam.patient_id = ?
+      AND DATE(pam.created_at) = ?
+    ORDER BY pam.created_at DESC
+  `;
+
+  pool.query(medicalQuery, [patient_id, date], async (err, records) => {
+    if (err) {
+      return res.status(500).json({ success: false, message: "Error fetching medical records", error: err.message });
+    }
+
+    if (records.length === 0) {
+      return res.status(404).json({ success: false, message: "No medical records found" });
+    }
+
+    try {
+      const enrichedRecords = await Promise.all(
+        records.map(async (row) => {
+          const medical_id = row.id;
+
+          const {
+            vitals_id, gender, age, doctor_id, recorded_at, blood_pressure,
+            respiratory_rate, pulse, spo2, rbs_mg, rbs_nmol, bp_position,
+            temperature, weight, height, bmi, risk_of_fall, urgency, notes, nurse,
+            ...medicalData
+          } = row;
+
+          const vitals = {
+            id: vitals_id,
+            gender,
+            age,
+            doctor_id,
+            recorded_at,
+            blood_pressure,
+            respiratory_rate,
+            pulse,
+            spo2,
+            rbs_mg,
+            rbs_nmol,
+            bp_position,
+            temperature,
+            weight,
+            height,
+            bmi,
+            risk_of_fall,
+            urgency,
+            notes,
+            nurse
+          };
+
+          // Parallel queries for related tables
+          const [diagnosis, prescriptions, allergies, chronicIllnesses, xRay] = await Promise.all([
+            new Promise((resolve, reject) => pool.query(`SELECT * FROM diagnosis WHERE medical_id = ?`, [medical_id], (e, r) => e ? reject(e) : resolve(r))),
+            new Promise((resolve, reject) => pool.query(`SELECT * FROM prescriptions WHERE medical_id = ?`, [medical_id], (e, r) => e ? reject(e) : resolve(r))),
+            new Promise((resolve, reject) => pool.query(`SELECT * FROM patient_allergies WHERE medical_id = ?`, [medical_id], (e, r) => e ? reject(e) : resolve(r))),
+            new Promise((resolve, reject) => pool.query(`SELECT * FROM chronic_illness WHERE medical_id = ?`, [medical_id], (e, r) => e ? reject(e) : resolve(r))),
+            new Promise((resolve, reject) => pool.query(`SELECT * FROM xray_and_radiology WHERE medical_id = ?`, [medical_id], (e, r) => e ? reject(e) : resolve(r))),
+          ]);
+
+          // Fetch rx_list for each prescription
+          const enrichedPrescriptions = await Promise.all(
+            prescriptions.map((prescription) => {
+              return new Promise((resolve, reject) => {
+                pool.query(`SELECT * FROM rx_list WHERE prescription_id = ?`, [prescription.prescription_id], (errRx, rxItems) => {
+                  if (errRx) return reject(errRx);
+                  resolve({ ...prescription, rx_list: rxItems });
+                });
+              });
+            })
+          );
+
+          return {
+            ...medicalData,
+            vitals,
+            diagnosis,
+            prescriptions: enrichedPrescriptions,
+            allergies,
+            chronic_illnesses: chronicIllnesses,
+            xRay_and_radiology: xRay
+          };
+        })
+      );
+
+      res.status(200).json({
+        success: true,
+        message: `All medical records for patient ${patient_id} on ${date} fetched successfully`,
+        data: enrichedRecords
+      });
+
+    } catch (error) {
+      res.status(500).json({ success: false, message: "Error enriching medical records", error: error.message });
+    }
   });
 };
 
@@ -6624,7 +6852,7 @@ const addXrayReport = (req, res) => {
 
       // 💾 Step 3: Insert report into xRay_and_radiology
       const insertQuery = `
-        INSERT INTO xRay_and_radiology 
+        INSERT INTO xray_and_radiology 
         (title, description, attachment, medical_id, patient_id)
         VALUES (?, ?, ?, ?, ?)
       `;
@@ -6768,7 +6996,7 @@ const addPrescription = (req, res)=> {
       const patient_id = result[0].patient_id;
 
       const insertQuery = `
-        INSERT INTO prescription (medical_id, patient_id, prescription_id)
+        INSERT INTO prescriptions (medical_id, patient_id, prescription_id)
         VALUES (?, ?, ?)
       `;
 
@@ -6866,7 +7094,7 @@ const addPatientAllergy = async (req, res) => {
     const patient_id = result[0].patient_id;
 
     const insertQuery = `
-      INSERT INTO patient_allergy (medical_id, patient_id, allergy_text)
+      INSERT INTO patient_allergies (medical_id, patient_id, allergy_text)
       VALUES (?, ?, ?)
     `;
 
@@ -6984,6 +7212,8 @@ export default {
   deleteSpecialityById,
   addPatientMedicals ,
   getMedicalDataWithVitals,
+  getAllMedicalDataByPatient,
+  getMedicalRecordsByDate,
   addXrayReport,
   addDiagnosis,
 addPrescription,
