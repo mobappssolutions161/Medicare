@@ -34,6 +34,7 @@ router.put("/updatePatient/:patientId", upload.fields([
 router.delete("/deletePatient/:patientId", adminController.deletePatient)
 router.post("/AddPatientServices", adminController.AddPatientServices)
 router.get("/GetPatientServices/:id", adminController.GetPatientServices)
+router.delete("/DeletePatientService/:id", adminController.DeletePatientService)
 
 router.post("/createAppointment", adminController.createAppointment)
 router.get("/getAllAppointments", adminController.getAllAppointments)
@@ -132,6 +133,8 @@ router.post('/addPatientMedicals/:patient_id', adminController.addPatientMedical
 router.get('/getMedicalDataWithVitals/:patient_id', adminController.getMedicalDataWithVitals);
 router.get('/getAllMedicalDataByPatient/:patient_id', adminController.getAllMedicalDataByPatient);
 router.post('/getMedicalRecordsByDate/:patient_id', adminController.getMedicalRecordsByDate);
+router.get('/getAllMedicalData', adminController.getAllMedicalData);
+router.post('/searchMedicalField', adminController.searchMedicalField);
 
 router.post('/addXrayReport',upload.single("attachment") , adminController.addXrayReport);
 router.post('/addDiagnosis', adminController.addDiagnosis);

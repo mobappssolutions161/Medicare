@@ -58,7 +58,6 @@ const getAllUsers = async (req, res) => {
     `;
 
     pool.query(query, (error, result) => {
-      console.log(result)
       if (error) {
         return res.status(400).json({
           success: false,
@@ -141,12 +140,9 @@ const getAllUsers = async (req, res) => {
 //       const currentStatus = parseInt(currentStatusRaw);
 //       let newStatus = currentStatus === 1 ? 0 : 1;
 //       newStatus = String(newStatus)
-//       console.log(`Current status: ${currentStatusRaw} (parsed: ${currentStatus}), New status: ${newStatus}`);
-
 //       const updateQuery = "UPDATE user SET is_active = ? WHERE id = ?";
 //       pool.query(updateQuery, [newStatus, id], (updateErr, updateResult) => {
 //         if (updateErr) {
-//           console.error("Update Error:", updateErr.message);
 //           return res.status(500).json({
 //             success: false,
 //             message: "Error updating status",
@@ -154,7 +150,6 @@ const getAllUsers = async (req, res) => {
 //           });
 //         }
 
-//         console.log('Update Result:', updateResult);
 
 //         if (updateResult.affectedRows === 0) {
 //           return res.status(500).json({
@@ -172,7 +167,6 @@ const getAllUsers = async (req, res) => {
 //       });
 //     });
 //   } catch (err) {
-//     console.error("Catch Error:", err.message);
 //     return res.status(500).json({
 //       success: false,
 //       message: "Internal Server Error",
@@ -370,7 +364,6 @@ const getAllNurses = async (req, res) => {
       });
     });
   } catch (err) {
-    console.error("Error in getAllNurses:", err);
     res.status(500).json({ success: false, message: "Server Error" });
   }
 };
@@ -568,7 +561,6 @@ const changeUserStatus = async (req, res) => {
     const getUserIdQuery = "SELECT user_id FROM doctors WHERE id = ? LIMIT 1";
     pool.query(getUserIdQuery, [userId], (err, doctorResult) => {
       if (err) {
-        console.error("Error fetching doctor:", err);
         return res.status(500).json({
           success: false,
           message: "Error fetching doctor info",
@@ -589,7 +581,6 @@ const changeUserStatus = async (req, res) => {
       const checkQuery = "SELECT is_active FROM users WHERE id = ? LIMIT 1";
       pool.query(checkQuery, [userId], (err, userResult) => {
         if (err) {
-          console.error("Error checking user status:", err);
           return res.status(500).json({
             success: false,
             message: "Error checking user status",
@@ -621,7 +612,6 @@ const changeUserStatus = async (req, res) => {
         `;
         pool.query(updateQuery, [status, userId], (err, updateResult) => {
           if (err) {
-            console.error("Error updating user status:", err);
             return res.status(500).json({
               success: false,
               message: "Error updating user status",
@@ -637,7 +627,6 @@ const changeUserStatus = async (req, res) => {
       });
     });
   } catch (error) {
-    console.error("Exception in changeUserStatusByDoctorId:", error);
     return res.status(500).json({
       success: false,
       message: "Internal Server Error",
@@ -662,7 +651,6 @@ const softDeleteUser = async (req, res) => {
     const getUserIdQuery = "SELECT user_id FROM doctors WHERE id = ?";
     pool.query(getUserIdQuery, [userId], (err, doctorResult) => {
       if (err) {
-        console.error("Error fetching doctor:", err);
         return res.status(500).json({
           success: false,
           message: "Error fetching doctor info",
@@ -689,7 +677,6 @@ const softDeleteUser = async (req, res) => {
 
       pool.query(softDeleteQuery, [userId], (err, result) => {
         if (err) {
-          console.error("Error updating user:", err);
           return res.status(500).json({
             success: false,
             message: "Error performing soft delete on user",
@@ -711,7 +698,6 @@ const softDeleteUser = async (req, res) => {
       });
     });
   } catch (error) {
-    console.error("Exception in softDeleteDoctorById:", error);
     return res.status(500).json({
       success: false,
       message: "Internal Server Error",
@@ -803,7 +789,6 @@ const deleteDoctor = async (req, res) => {
       });
     });
   } catch (error) {
-    console.error("Error in deleteDoctor:", error);
     return res.status(500).json({
       success: false,
       message: "Internal Server Error",
@@ -1403,8 +1388,7 @@ const AddPatientServices = async (req, res) => {
       [patientId, doctor_id, serviceId, amount, insurance, vat],
       (err, result) => {
         if (err) {
-          console.error("Error inserting patient service:", err);
-          return res.status(500).json({ error: "Database error" });
+          return res.status(500).json({ success : false, message : "Database error" , error : err.message });
         }
         res.status(201).json({
           message: "Patient service created successfully",
@@ -1437,7 +1421,6 @@ const GetPatientServices = async (req, res) => {
       ps.vat,
       ps.createdAt,
       ps.updatedAt,
-      s.serial_number,
       s.serviceCode ,
       s.serviceName, s.durationMinutes, s.standardCost, s.secondaryCost, s.insuranceCost, s.category
     FROM patient_services ps
@@ -1447,15 +1430,14 @@ const GetPatientServices = async (req, res) => {
 
     pool.query(sql, [patientId], (err, results) => {
       if (err) {
-        console.error("Error fetching service by ID:", err);
-        return res.status(500).json({ error: "Database error" });
+          return res.status(500).json({ success : false, message : "Database error" , error : err.message });
       }
 
       if (results.length === 0) {
         return res.status(404).json({ message: "Service not found" });
       }
 
-      res.json({ data: results });
+      return res.status(200).json({ success : true , message : "All patient services fetched successfully",data: results });
     });
   } catch (error) {
     return res.status(500).json({
@@ -1465,6 +1447,44 @@ const GetPatientServices = async (req, res) => {
     });
   }
 };
+
+const DeletePatientService = async (req, res) => {
+  try {
+    const serviceId = req.params.id; // patient_services table row ID
+
+    const sql = `DELETE FROM patient_services WHERE id = ?`;
+
+    pool.query(sql, [serviceId], (err, result) => {
+      if (err) {
+        return res.status(500).json({
+          success: false,
+          message: "Database error",
+          error: err.message
+        });
+      }
+
+      if (result.affectedRows === 0) {
+        return res.status(404).json({
+          success: false,
+          message: "Patient service not found"
+        });
+      }
+
+      return res.status(200).json({
+        success: true,
+        message: "Patient service deleted successfully"
+      });
+    });
+
+  } catch (error) {
+    return res.status(500).json({
+      success: false,
+      message: "Server error",
+      error: error.message
+    });
+  }
+};
+
 
 const deletePatient = async (req, res) => {
   try {
@@ -1478,7 +1498,6 @@ const deletePatient = async (req, res) => {
 
     const deleteQuery = `Delete from patients where id = ?`;
     pool.query(deleteQuery, [patientId], (err, result) => {
-      console.log(result);
       if (err) {
         return res.status(500).json({
           success: false,
@@ -1670,7 +1689,7 @@ const createAppointment = (req, res) => {
         }
 
         if (overlapResults.length > 0) {
-          return res.status(409).json({ success: false, message: "Appointment overlaps with an existing one for the patient or doctor" });
+          return res.status(409).json({ success: false, message: "The selected time is already booked ! Please select another slot." });
         }
 
         if (userDoctorId) {
@@ -1863,11 +1882,10 @@ const getAllAppointments = async (req, res) => {
 
     return res.status(200).json({
       success: true,
-      message: "All appointments ordered by date and time (DESC)",
+      message: "All appointments fetched successfully",
       data: enhanced,
     });
   } catch (error) {
-    console.error("Error fetching appointments:", error);
     return res.status(500).json({
       success: false,
       message: "An error occurred while retrieving appointments",
@@ -1969,7 +1987,6 @@ const getUpcomingAppointment = async (req, res) => {
       return `${m}m`;
     }
   } catch (error) {
-    console.error("Error fetching upcoming appointments:", error);
     return res.status(500).json({
       success: false,
       message: "An error occurred while fetching upcoming appointments",
@@ -2194,7 +2211,6 @@ const getWaitingAppointments = async (req, res) => {
       data: appointments,
     });
   } catch (error) {
-    console.error("Error fetching appointments:", error);
     return res.status(500).json({
       success: false,
       message: "An error occurred while retrieving appointments",
@@ -2263,7 +2279,6 @@ const getConfirmedAppointments = async (req, res) => {
       data: enhancedAppointments,
     });
   } catch (error) {
-    console.error("Error fetching appointments:", error);
     return res.status(500).json({
       success: false,
       message: "An error occurred while retrieving appointments",
@@ -2348,7 +2363,6 @@ const doctorAvailability = async (req, res) => {
   try {
     pool.query(checkSql, uniqueDoctorIds, (checkErr, results) => {
       if (checkErr) {
-        console.error("Doctor ID check failed:", checkErr);
         return res
           .status(500)
           .json({ error: "Internal server error during doctor check" });
@@ -2430,7 +2444,6 @@ const doctorAvailability = async (req, res) => {
 
           pool.query(insertSql, values, (insertErr, result) => {
             if (insertErr) {
-              console.error("Database insert error:", insertErr);
               return res
                 .status(500)
                 .json({ error: "Failed to insert availability records" });
@@ -2443,12 +2456,10 @@ const doctorAvailability = async (req, res) => {
           });
         })
         .catch((err) => {
-          console.error("Overlap check error:", err);
           res.status(500).json({ error: "Failed to check time conflicts" });
         });
     });
   } catch (err) {
-    console.error("Unexpected error:", err);
     res.status(500).json({ success: false, error: "Server error" });
   }
 };
@@ -2456,7 +2467,6 @@ const doctorAvailability = async (req, res) => {
 const getAppointmentsByDate = async (req, res) => {
   try {
     let { startDate, endDate } = req.body;
-    console.log(req.body);
 
     const isoDateRegex = /^\d{4}-\d{2}-\d{2}$/;
 
@@ -2518,7 +2528,6 @@ const getAppointmentsByDate = async (req, res) => {
       data: appointments,
     });
   } catch (error) {
-    console.error("Error fetching appointments by date range:", error);
     return res.status(500).json({
       success: false,
       message: "An error occurred while retrieving appointments",
@@ -2554,7 +2563,6 @@ const getAppointmentsByDoctorId = async (req, res) => {
 
     pool.query(query, [doctorId], (err, results) => {
       if (err) {
-        console.error("Database error:", err);
         return res.status(500).json({
           success: false,
           message: "Database error",
@@ -2577,7 +2585,6 @@ const getAppointmentsByDoctorId = async (req, res) => {
       });
     });
   } catch (error) {
-    console.error("Server error:", error);
     return res.status(500).json({
       success: false,
       message: "Server error",
@@ -2632,7 +2639,6 @@ const appointmentByDoctorId = async (req, res) => {
       data: results,
     });
   } catch (error) {
-    console.error("Error fetching appointments:", error);
     return res.status(500).json({
       success: false,
       message: "Server error",
@@ -2681,7 +2687,6 @@ const appointmentByPatientId = async (req, res) => {
       data: results,
     });
   } catch (error) {
-    console.error("Error fetching appointments by patient ID:", error);
     return res.status(500).json({
       success: false,
       message:
@@ -2849,7 +2854,6 @@ const changeAppointmentStatus = async (req, res) => {
 const cancelAppointmentStatus = async (req, res) => {
   try {
     const { appointmentId } = req.params;
-    console.log(appointmentId);
     
     if (!appointmentId) {
       return res.status(400).json({
@@ -2923,7 +2927,6 @@ const recordPatientVitals = async (req, res) => {
       urgency,
       notes
     } = req.body;
-console.log(req.body);
 
     // Step 1: Validate required fields
     if (!patient_id || !recorded_at || blood_pressure_systolic === null || blood_pressure_diastolic === null || weight === null || height === null || !bp_position) {
@@ -2962,7 +2965,6 @@ const fullName = `${firstName} ${middleName || ''} ${lastName}`.trim().replace(/
 
           pool.query(`SELECT fullName FROM doctors WHERE id = ?`, [doctor_id], (docErr, docRes) => {
             if (docErr || !docRes.length) return resolve(null);
-            console.log(docRes);
             
             resolve(docRes[0].fullName);
           });
@@ -3291,7 +3293,6 @@ const recordPatientDiagnosis = (req, res) => {
   const checkPatientQuery = `SELECT id FROM patients WHERE id = ?`;
   pool.query(checkPatientQuery, [patient_id], (patientErr, patientResult) => {
     if (patientErr) {
-      console.error("Error checking for patient:", patientErr);
       return res.status(500).json({
         success: false,
         message: "Error checking for patient",
@@ -3310,7 +3311,6 @@ const recordPatientDiagnosis = (req, res) => {
     const checkDoctorQuery = `SELECT id FROM doctors WHERE id = ?`;
     pool.query(checkDoctorQuery, [doctor_id], (doctorErr, doctorResult) => {
       if (doctorErr) {
-        console.error("Error checking for doctor:", doctorErr);
         return res.status(500).json({
           success: false,
           message: "Error checking for doctor",
@@ -3329,7 +3329,6 @@ const recordPatientDiagnosis = (req, res) => {
       const checkIcd10Query = `SELECT id FROM icds_10 WHERE id = ?`;
       pool.query(checkIcd10Query, [icd10_id], (icd10Err, icd10Result) => {
         if (icd10Err) {
-          console.error("Error checking for ICD-10 code:", icd10Err);
           return res.status(500).json({
             success: false,
             message: "Error checking for ICD-10 code",
@@ -3362,7 +3361,6 @@ const recordPatientDiagnosis = (req, res) => {
 
         pool.query(insertDiagnosisQuery, values, (insertErr, result) => {
           if (insertErr) {
-            console.error("Error saving patient diagnosis:", insertErr);
             return res.status(500).json({
               success: false,
               message: "Error saving patient diagnosis",
@@ -3558,7 +3556,6 @@ const getAllRxList = async (req, res) => {
     });
 
   } catch (error) {
-    console.error("Error fetching rx list:", error);
     return res.status(500).json({
       success: false,
       message: "An error occurred while retrieving the rx list",
@@ -3619,7 +3616,6 @@ const getRxById = async (req, res) => {
     });
 
   } catch (error) {
-    console.error("Error fetching rx by ID:", error);
     return res.status(500).json({
       success: false,
       message: "Internal Server Error",
@@ -3936,7 +3932,6 @@ const addDrug = async (req, res) => {
 
       pool.query(checkQuery, checkValues, (checkErr, checkResult) => {
         if (checkErr) {
-          console.error("Error checking drug:", checkErr);
           return res.status(500).json({
             success: false,
             message: "Database error while checking for existing drug",
@@ -3976,7 +3971,6 @@ const addDrug = async (req, res) => {
 
         pool.query(insertQuery, values, (err, result) => {
           if (err) {
-            console.error("Error adding drug:", err);
             return res.status(500).json({
               success: false,
               message: "Failed to add drug",
@@ -3993,7 +3987,6 @@ const addDrug = async (req, res) => {
       });
     }
   } catch (err) {
-    console.error("Unexpected error adding drug:", err);
     return res.status(500).json({
       success: false,
       message: "Unexpected error occurred",
@@ -4051,7 +4044,6 @@ const getDrugById = async (req, res) => {
     const query = `SELECT * FROM drugs WHERE id = ? AND is_deleted = 0`;
 
     pool.query(query, [drugId], (err, results) => {
-      console.log(results);
       
       if (err) {
         return res.status(500).json({
@@ -4179,7 +4171,6 @@ const updateDrug = async (req, res) => {
 const deleteDrug = async (req, res) => {
   try {
     const { drugId } = req.params;
-    console.log(drugId);
     
     if (!drugId) {
       return res.status(400).json({
@@ -4191,7 +4182,6 @@ const deleteDrug = async (req, res) => {
     // Step 1: Check if drug exists and is not already deleted
     const checkQuery = `SELECT * FROM drugs WHERE id = ? AND is_deleted = 0`;
     pool.query(checkQuery, [drugId], (checkErr, checkResult) => {
-      console.log(checkResult);
       
       if (checkErr) {
         return res.status(500).json({
@@ -4245,7 +4235,6 @@ const addServices = async (req, res) => {
       secondaryCost,
       insuranceCost,
     } = req.body;
-    console.log(req.body);
     
     if (!serviceName || !category || !durationMinutes) {
       return res.status(400).json({
@@ -5314,7 +5303,6 @@ const getLabRequestsByStatus = (req, res) => {
 
   pool.query(query, [status], (err, results) => {
     if (err) {
-      console.error("SQL Error:", err);
       return res.status(500).json({
         success: false,
         message: "Failed to retrieve lab requests",
@@ -5834,7 +5822,6 @@ const serviceCategory =  async(req,res)=>{
     const insertQuery = "Insert into service_categories (category_name) values (?)"
 
     pool.query(insertQuery,[category_name],(err,result)=>{
-      console.log(result)
       if(err){
         return res.status(500).json({
           success : false,
@@ -6373,92 +6360,103 @@ const addPatientMedicals = async (req, res) => {
 
     // Step 2: Query latest patient_vitals for this patient and today's date
     pool.query(
-  `SELECT id FROM patient_vitals WHERE patient_id = ? AND DATE(recorded_at) = ? ORDER BY recorded_at DESC LIMIT 1`,
-  [patient_id, today],
-  (err, vitals) => {
-    if (err) {
-      return res.status(500).json({
-        success: false,
-        message: "Error fetching vitals",
-        error: err.message
-      });
-    }
+      `SELECT id FROM patient_vitals 
+       WHERE patient_id = ? AND DATE(recorded_at) = ? 
+       ORDER BY recorded_at DESC LIMIT 1`,
+      [patient_id, today],
+      (err, vitals) => {
+        if (err) {
+          return res.status(500).json({
+            success: false,
+            message: "Error fetching vitals",
+            error: err.message
+          });
+        }
 
-    if (vitals.length === 0) {
-      return res.status(404).json({
-        success: false,
-        message: `No vitals found for patient_id=${patient_id} on date=${today}`
-      });
-    }
+        if (vitals.length === 0) {
+          return res.status(404).json({
+            success: false,
+            message: `No vitals found for patient_id=${patient_id} on date=${today}`
+          });
+        }
 
-    const patient_vital_id = vitals[0].id;
+        const patient_vital_id = vitals[0].id;
 
-    // Now insert the record into patient_all_medicals
-    const insertQuery = `
-      INSERT INTO patient_all_medicals (
-        patient_id,
-        chief_complaint,
-        history_of_present_illness,
-        history_of_past_illness,
-        examination_general,
-        examination_systemic,
-        examination_local,
-        treatment_plan,
-        advises,
-        extra_notes,
-        pain_assessment,
-        patient_vital,
-        created_at,
-        updated_at
-      ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, NOW(), NOW())
-    `;
+        // ✅ Step 3: Check if medicals already exist for today
+        pool.query(
+          `SELECT id FROM patient_all_medicals 
+           WHERE patient_id = ? AND DATE(created_at) = ? LIMIT 1`,
+          [patient_id, today],
+          (err3, existing) => {
+            if (err3) {
+              return res.status(500).json({
+                success: false,
+                message: "Error checking existing medicals",
+                error: err3.message
+              });
+            }
 
-    const {
-      chief_complaint,
-      history_of_present_illness,
-      history_of_past_illness,
-      examination_general,
-      examination_systemic,
-      examination_local,
-      treatment_plan,
-      advises,
-      extra_notes,
-      pain_assessment
-    } = req.body;
+            if (existing.length > 0) {
+              return res.status(400).json({
+                success: false,
+                message: `Medicals for patient_id=${patient_id} already exist for date=${today}`
+              });
+            }
 
-    const values = [
-      patient_id,
-      chief_complaint,
-      history_of_present_illness,
-      history_of_past_illness,
-      examination_general,
-      examination_systemic,
-      examination_local,
-      treatment_plan,
-      advises,
-      extra_notes,
-      pain_assessment,
-      patient_vital_id
-    ];
+            // ✅ Step 4: Insert the record
+            const insertQuery = `
+              INSERT INTO patient_all_medicals (
+                patient_id,
+                chief_complaint,
+                history_of_present_illness,
+                history_of_past_illness,
+                examination_general,
+                examination_systemic,
+                examination_local,
+                treatment_plan,
+                advises,
+                extra_notes,
+                pain_assessment,
+                patient_vital,
+                created_at,
+                updated_at
+              ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, NOW(), NOW())
+            `;
 
-    pool.query(insertQuery, values, (err2, result) => {
-      if (err2) {
-        return res.status(500).json({
-          success: false,
-          message: "Insert failed",
-          error: err2.message
-        });
+            const values = [
+              patient_id,
+              chief_complaint,
+              history_of_present_illness,
+              history_of_past_illness,
+              examination_general,
+              examination_systemic,
+              examination_local,
+              treatment_plan,
+              advises,
+              extra_notes,
+              pain_assessment,
+              patient_vital_id,
+            ];
+
+            pool.query(insertQuery, values, (err2, result) => {
+              if (err2) {
+                return res.status(500).json({
+                  success: false,
+                  message: "Insert failed",
+                  error: err2.message
+                });
+              }
+
+              return res.status(200).json({
+                success: true,
+                message: "Patient medicals added successfully",
+              });
+            });
+          }
+        );
       }
-
-      return res.status(200).json({
-        success: true,
-        message: "Patient medicals added successfully",
-      });
-    });
-  }
-);
+    );
   } catch (err) {
-    console.error("Insert error:", err);
     return res.status(500).json({
       success: false,
       message: "Something went wrong",
@@ -6466,6 +6464,7 @@ const addPatientMedicals = async (req, res) => {
     });
   }
 };
+
 
 const getMedicalDataWithVitals = (req, res) => {
   const { patient_id } = req.params;
@@ -6549,7 +6548,8 @@ const getMedicalDataWithVitals = (req, res) => {
             const rxQuery = `SELECT * FROM rx_list WHERE id = ?`;
             pool.query(rxQuery, [prescription.prescription_id], (errRx, rxItems) => {
               if (errRx) return reject(errRx);
-              resolve({ ...prescription, rx_list: rxItems });
+const mergedData = { ...prescription, ...(rxItems[0] || {}) };
+                        resolve(mergedData);               
             });
           });
         }));
@@ -6663,9 +6663,10 @@ const getAllMedicalDataByPatient = (req, res) => {
           const enrichedPrescriptions = await Promise.all(
             prescriptions.map((prescription) => {
               return new Promise((resolve, reject) => {
-                pool.query(`SELECT * FROM rx_list WHERE prescription_id = ?`, [prescription.prescription_id], (errRx, rxItems) => {
+                pool.query(`SELECT * FROM rx_list WHERE id = ?`, [prescription.prescription_id], (errRx, rxItems) => {
                   if (errRx) return reject(errRx);
-                  resolve({ ...prescription, rx_list: rxItems });
+                  const mergedData = { ...prescription, ...(rxItems[0] || {}) };
+                        resolve(mergedData); 
                 });
               });
             })
@@ -6696,8 +6697,8 @@ const getAllMedicalDataByPatient = (req, res) => {
 };
 
 const getMedicalRecordsByDate = (req, res) => {
-  const {patient_id} = req.params
-  const {date } = req.body;
+  const { patient_id } = req.params;
+  const { date } = req.body;
 
   if (!patient_id || !date) {
     return res.status(400).json({
@@ -6720,6 +6721,106 @@ const getMedicalRecordsByDate = (req, res) => {
   `;
 
   pool.query(medicalQuery, [patient_id, date], async (err, records) => {
+    if (err) {
+      return res.status(500).json({ success: false, message: "Error fetching medical records", error: err.message });
+    }
+
+    if (records.length === 0) {
+      return res.status(404).json({ success: false, message: "No medical records found" });
+    }
+
+    try {
+      const row = records[0]; // sirf pehla record lenge
+      const medical_id = row.id;
+
+      const {
+        vitals_id, gender, age, doctor_id, recorded_at, blood_pressure,
+        respiratory_rate, pulse, spo2, rbs_mg, rbs_nmol, bp_position,
+        temperature, weight, height, bmi, risk_of_fall, urgency, notes, nurse,
+        ...medicalData
+      } = row;
+
+      const vitals = {
+        id: vitals_id,
+        gender,
+        age,
+        doctor_id,
+        recorded_at,
+        blood_pressure,
+        respiratory_rate,
+        pulse,
+        spo2,
+        rbs_mg,
+        rbs_nmol,
+        bp_position,
+        temperature,
+        weight,
+        height,
+        bmi,
+        risk_of_fall,
+        urgency,
+        notes,
+        nurse
+      };
+
+      // Parallel queries
+      const [diagnosis, prescriptions, allergies, chronicIllnesses, xRay] = await Promise.all([
+        new Promise((resolve, reject) => pool.query(`SELECT * FROM diagnosis WHERE medical_id = ?`, [medical_id], (e, r) => e ? reject(e) : resolve(r))),
+        new Promise((resolve, reject) => pool.query(`SELECT * FROM prescriptions WHERE medical_id = ?`, [medical_id], (e, r) => e ? reject(e) : resolve(r))),
+        new Promise((resolve, reject) => pool.query(`SELECT * FROM patient_allergies WHERE medical_id = ?`, [medical_id], (e, r) => e ? reject(e) : resolve(r))),
+        new Promise((resolve, reject) => pool.query(`SELECT * FROM chronic_illness WHERE medical_id = ?`, [medical_id], (e, r) => e ? reject(e) : resolve(r))),
+        new Promise((resolve, reject) => pool.query(`SELECT * FROM xray_and_radiology WHERE medical_id = ?`, [medical_id], (e, r) => e ? reject(e) : resolve(r))),
+      ]);
+
+      // Enrich prescriptions
+      const enrichedPrescriptions = await Promise.all(
+        prescriptions.map((prescription) => {
+          return new Promise((resolve, reject) => {
+            pool.query(`SELECT * FROM rx_list WHERE id = ?`, [prescription.prescription_id], (errRx, rxItems) => {
+              if (errRx) return reject(errRx);
+                        const mergedData = { ...prescription, ...(rxItems[0] || {}) };
+                        resolve(mergedData);              
+            });
+          });
+        })
+      );
+
+      const finalRecord = {
+        ...medicalData,
+        vitals,
+        diagnosis,
+        prescriptions: enrichedPrescriptions,
+        allergies,
+        chronic_illnesses: chronicIllnesses,
+        xRay_and_radiology: xRay
+      };
+
+      res.status(200).json({
+        success: true,
+        message: `Medical record for patient ${patient_id} on ${date} fetched successfully`,
+        data: finalRecord // <-- ab object hoga, array nahi
+      });
+
+    } catch (error) {
+      res.status(500).json({ success: false, message: "Error enriching medical records", error: error.message });
+    }
+  });
+};
+
+const getAllMedicalData = (req, res) => {
+
+  const medicalQuery = `
+    SELECT pam.*, 
+           pv.id AS vitals_id,
+           pv.gender, pv.age, pv.doctor_id, pv.recorded_at, pv.blood_pressure,
+           pv.respiratory_rate, pv.pulse, pv.spo2, pv.rbs_mg, pv.rbs_nmol, pv.bp_position,
+           pv.temperature, pv.weight, pv.height, pv.bmi, pv.risk_of_fall, pv.urgency, pv.notes, pv.nurse
+    FROM patient_all_medicals pam
+    LEFT JOIN patient_vitals pv ON pam.patient_vital = pv.id
+    ORDER BY pam.created_at DESC
+  `;
+  
+  pool.query(medicalQuery, async (err, records) => {
     if (err) {
       return res.status(500).json({ success: false, message: "Error fetching medical records", error: err.message });
     }
@@ -6776,9 +6877,10 @@ const getMedicalRecordsByDate = (req, res) => {
           const enrichedPrescriptions = await Promise.all(
             prescriptions.map((prescription) => {
               return new Promise((resolve, reject) => {
-                pool.query(`SELECT * FROM rx_list WHERE prescription_id = ?`, [prescription.prescription_id], (errRx, rxItems) => {
+                pool.query(`SELECT * FROM rx_list WHERE id = ?`, [prescription.prescription_id], (errRx, rxItems) => {
                   if (errRx) return reject(errRx);
-                  resolve({ ...prescription, rx_list: rxItems });
+                    const mergedData = { ...prescription, ...(rxItems[0] || {}) };
+                        resolve(mergedData); 
                 });
               });
             })
@@ -6798,14 +6900,76 @@ const getMedicalRecordsByDate = (req, res) => {
 
       res.status(200).json({
         success: true,
-        message: `All medical records for patient ${patient_id} on ${date} fetched successfully`,
+        message: `All medical records fetched successfully for patients`,
         data: enrichedRecords
       });
 
-    } catch (error) {
+    } catch (error) {      
       res.status(500).json({ success: false, message: "Error enriching medical records", error: error.message });
     }
   });
+};
+
+const searchMedicalField = (req, res) => {
+  try {
+    const { field, search } = req.query;
+
+    if (!field) {
+      return res.status(400).json({
+        success: false,
+        message: "Field is required",
+      });
+    }
+
+    // SQL injection prevention - allowed fields check
+    const allowedFields = [
+      "chief_complaint",
+      "history_of_present_illness",
+      "history_of_past_illness",
+      "examination_general",
+      "examination_systemic",
+      "examination_local",
+      "treatment_plan",
+      "advises",
+      "extra_notes"
+    ];
+    if (!allowedFields.includes(field)) {
+      return res.status(400).json({
+        success: false,
+        message: "Invalid field name",
+      });
+    }
+
+    let searchQuery = `SELECT DISTINCT ${field} FROM patient_all_medicals`;
+    let params = [];
+
+    if (search && search.trim() !== "") {
+      searchQuery += ` WHERE ${field} LIKE ?`;
+      params.push(`%${search}%`);
+    }
+
+    searchQuery += ` LIMIT 10`; // suggestion list short rakhne ke liye
+
+    pool.query(searchQuery, params, (err, result) => {
+      if (err) {
+        throw err;
+      }
+      return res.status(200).json({
+        success: true,
+        message: `Suggestions for ${field} fetched successfully`,
+        data: result
+          .map(row => row[field])
+          .filter(v => v && v.trim() !== "") // null/empty remove
+      });
+    });
+
+  } catch (error) {
+    return res.status(500).json({
+      success: false,
+      message: "Internal Server Error",
+      error: error.message,
+    });
+  }
 };
 
 const addXrayReport = (req, res) => {
@@ -6830,10 +6994,8 @@ const addXrayReport = (req, res) => {
     const fetchQuery = `SELECT * FROM patient_all_medicals WHERE id = ?`;
 
     pool.query(fetchQuery, [medical_id], function (err, result) {
-      console.log(result);
       
       if (err) {
-        console.error("Error fetching patient_id:", err);
         return res.status(500).json({
           success: false,
           message: "Database error while fetching patient_id",
@@ -6867,7 +7029,6 @@ const addXrayReport = (req, res) => {
 
       pool.query(insertQuery, values, function (insertErr, insertResult) {
         if (insertErr) {
-          console.error("Error inserting report:", insertErr);
           return res.status(500).json({
             success: false,
             message: "Failed to add X-ray/radiology report",
@@ -6883,7 +7044,6 @@ const addXrayReport = (req, res) => {
       });
     });
   } catch (error) {
-    console.error("Unexpected error:", error);
     return res.status(500).json({
       success: false,
       message: "Unexpected server error",
@@ -6910,7 +7070,6 @@ const addDiagnosis = (req, res)=> {
 
     pool.query(fetchQuery, [medical_id], function (err, result) {
       if (err) {
-        console.error("Error fetching patient_id:", err);
         return res.status(500).json({
           success: false,
           message: "Database error while fetching patient_id",
@@ -6936,7 +7095,6 @@ const addDiagnosis = (req, res)=> {
 
       pool.query(insertQuery, values, function (insertErr, insertResult) {
         if (insertErr) {
-          console.error("Error inserting diagnosis:", insertErr);
           return res.status(500).json({
             success: false,
             message: "Failed to add diagnosis",
@@ -6951,7 +7109,6 @@ const addDiagnosis = (req, res)=> {
       });
     });
   } catch (error) {
-    console.error("Unexpected error:", error);
     return res.status(500).json({
       success: false,
       message: "Unexpected server error",
@@ -6978,7 +7135,6 @@ const addPrescription = (req, res)=> {
 
     pool.query(fetchQuery, [medical_id], function (err, result) {
       if (err) {
-        console.error("Error fetching patient_id:", err);
         return res.status(500).json({
           success: false,
           message: "Database error while fetching patient_id",
@@ -7004,7 +7160,6 @@ const addPrescription = (req, res)=> {
 
       pool.query(insertQuery, values, function (insertErr, insertResult) {
         if (insertErr) {
-          console.error("Error inserting prescription:", insertErr);
           return res.status(500).json({
             success: false,
             message: "Failed to add prescription",
@@ -7019,7 +7174,6 @@ const addPrescription = (req, res)=> {
       });
     });
   } catch (error) {
-    console.error("Unexpected error:", error);
     return res.status(500).json({
       success: false,
       message: "Unexpected server error",
@@ -7131,6 +7285,7 @@ export default {
   updatePatient,
   AddPatientServices,
   GetPatientServices,
+  DeletePatientService,
   deletePatient,
   createAppointment,
   getAllAppointments,
@@ -7214,6 +7369,8 @@ export default {
   getMedicalDataWithVitals,
   getAllMedicalDataByPatient,
   getMedicalRecordsByDate,
+  getAllMedicalData,
+  searchMedicalField,
   addXrayReport,
   addDiagnosis,
 addPrescription,

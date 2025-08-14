@@ -11,7 +11,6 @@ function generateOtp() {
   for (let i = 0; i < 5; i++) {
     digit += Math.floor(Math.random() * 10).toString();
   }
-  console.log(digit);
   return parseInt(digit);
 }
 
@@ -275,7 +274,6 @@ const userVerifyOtp = async (req, res) => {
       pool.query("DELETE FROM user_otp WHERE otp = ?", [otp], (deleteErr) => {
         if (deleteErr) {
           // Log error but don't block response
-          console.error("Failed to delete OTP:", deleteErr.message);
         }
         // Respond after deletion attempt
         res.status(200).json({ success: true, message: "OTP verified successfully", data: userId });
