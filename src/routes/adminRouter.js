@@ -62,6 +62,8 @@ router.delete("/deletePatientVital/:id/:patientId", adminController.deletePatien
 router.post("/recordPatientDiagnosis", adminController.recordPatientDiagnosis)
 router.get("/getDiagnosisByPatientId/:patientId", adminController.getDiagnosisByPatientId)
 
+router.get("/getAllIcd10List", adminController.getAllIcd10List)
+
 router.post("/addRxMedicine", adminController.addRxMedicine)
 router.get("/getAllRxList", adminController.getAllRxList)
 router.get("/getRxById/:rxId",adminController.getRxById)
@@ -80,10 +82,11 @@ router.delete("/deleteDrug/:drugId", adminController.deleteDrug)
 
 router.post("/addServices", adminController.addServices)
 router.get("/getServices", adminController.getServices)
-router.put("/updateService/:id",adminController.updateService)
+router.put("/editLabServices/:labServiceId",adminController.editLabServices)
 router.delete("/deleteService/:id", adminController.deleteService)
 
 router.post("/addLabService", adminController.addLabService)
+router.get("/getAllLabServices", adminController.getAllLabServices)
 router.get("/getAllLabServices", adminController.getAllLabServices)
 router.delete("/deleteLabService/:serviceId", adminController.deleteLabService)
 
@@ -135,6 +138,13 @@ router.get('/getAllMedicalDataByPatient/:patient_id', adminController.getAllMedi
 router.post('/getMedicalRecordsByDate/:patient_id', adminController.getMedicalRecordsByDate);
 router.get('/getAllMedicalData', adminController.getAllMedicalData);
 router.post('/searchMedicalField', adminController.searchMedicalField);
+
+
+router.post('/createAllTableText', adminController.createAllTableText);
+router.get('/getAllTablesText', adminController.getAllTablesText);
+router.put('/editAllTableText/:id', adminController.editAllTableText);
+router.delete('/deleteAllTablesText/:id', adminController.deleteAllTablesText);
+
 
 router.post('/addXrayReport',upload.single("attachment") , adminController.addXrayReport);
 router.post('/addDiagnosis', adminController.addDiagnosis);

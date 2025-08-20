@@ -2955,7 +2955,7 @@ const recordPatientVitals = async (req, res) => {
       }
 
 const { firstName, middleName, lastName, age, gender } = patientResult[0];
-
+console.log(age)
 const fullName = `${firstName} ${middleName || ''} ${lastName}`.trim().replace(/\s+/g, ' ');
 
       // Optional: Fetch doctor name
@@ -3511,6 +3511,36 @@ const addRxMedicine = async (req, res) => {
     });
   }
 };
+
+const getAllIcd10List = (req,res)=>{
+  try {
+    const getQuery = `Select id , code , short_name as icdName from icds_10` 
+    pool.query(getQuery,(err,result)=>{
+      if (err) throw err;
+      if (!result.length) {
+      return res.status(404).json({
+        success: false,
+        message: "No medicines found",
+        data: [],
+      });
+    }
+
+    return res.status(200).json({
+      success: true,
+      message: "Medicines fetched successfully",
+      data: result,
+    });
+
+    })
+    
+  } catch (error) {
+    return res.status(500).json({
+      success: false,
+      message: "An error occurred while retrieving the rx list",
+      error: error.message,
+    });
+  }
+}
 
 const getAllRxList = async (req, res) => {
   try {
@@ -4468,7 +4498,8 @@ const addLabService = async (req, res) => {
 };
 
 const getAllLabServices = (req, res) => {
-  const query = "SELECT * FROM lab_services";
+  try {
+    const query = "SELECT * FROM lab_services";
 
   pool.query(query, (err, results) => {
     if (err) {
@@ -4492,8 +4523,70 @@ const getAllLabServices = (req, res) => {
       message: "Services fetched successfully",
       data: results,
     });
-  });
+  })
+  } catch (error) {
+    return res.status(500).json({
+      success : false,
+      message : "Internal Server Error",
+      error : error.message
+    })
+  }
+  
 };
+
+const editLabServices = (req,res) => {
+  try {
+
+    const labServiceId = req.params.labServiceId
+    
+    const {category , serviceName} = req.body
+
+    const serviceQuery = `Select * from lab_services where id = ?`
+    
+    pool.query(serviceQuery,[labServiceId],(err,result)=>{
+      
+      if(err){
+        return res.status(500).json({
+        success: false,
+        message: "Database query failed",
+        error: err.message
+      })
+    }
+      if(result.length === 0){
+        return res.status(400).json({
+          success : true,
+          message : "Service id not found"
+        })
+      }
+
+        const updatedCategory = category || result[0].category
+        const updatedServiceName = serviceName || result[0].serviceName
+
+      const updateQuery = `Update lab_services set category = ? ,  serviceName = ? where id = ?`
+
+      pool.query(updateQuery,[updatedCategory,updatedServiceName,labServiceId],(err,updatedResult)=>{
+        if(err){
+        return res.status(500).json({
+        success: false,
+        message: "Database query failed",
+        error: err.message
+      })
+    }
+
+    return res.status(200).json({
+      success : true,
+      message : "Data updated successfully"
+    })
+      })
+    })
+  } catch (error) {
+    return res.status(500).json({
+      success : false,
+      message : "Internal Server Error",
+      error : error.message
+    })
+  }
+}
 
 const deleteLabService = (req, res) => {
   const serviceId = req.params.serviceId;
@@ -6338,6 +6431,36 @@ const searchComplaints = (req, res) => {
   });
 };
 
+// Helper function to insert suggestion text if not exists
+
+const saveSuggestion = (table, text) => {
+  return new Promise((resolve, reject) => {
+    if (!text || text.trim() === "") return resolve(); // skip if empty
+
+    pool.query(
+      `SELECT id FROM ${table} WHERE LOWER(text) = LOWER(?) LIMIT 1`,
+      [text],
+      (err, rows) => {
+        if (err) return reject(err);
+
+        if (rows.length === 0) {
+          // Insert new suggestion
+          pool.query(
+            `INSERT INTO ${table} (text, created_at, updated_at) VALUES (?, NOW(), NOW())`,
+            [text],
+            (err2) => {
+              if (err2) return reject(err2);
+              resolve();
+            }
+          );
+        } else {
+          resolve(); // already exists
+        }
+      }
+    );
+  });
+};
+
 const addPatientMedicals = async (req, res) => {
   try {
     const {
@@ -6355,57 +6478,61 @@ const addPatientMedicals = async (req, res) => {
 
     const patient_id = req.params.patient_id;
 
-    // Step 1: Get today's date in YYYY-MM-DD
     const today = new Date().toISOString().split("T")[0];
 
-    // Step 2: Query latest patient_vitals for this patient and today's date
+    // ✅ Get latest patient vitals for today
     pool.query(
       `SELECT id FROM patient_vitals 
        WHERE patient_id = ? AND DATE(recorded_at) = ? 
        ORDER BY recorded_at DESC LIMIT 1`,
       [patient_id, today],
-      (err, vitals) => {
-        if (err) {
-          return res.status(500).json({
-            success: false,
-            message: "Error fetching vitals",
-            error: err.message
-          });
-        }
-
-        if (vitals.length === 0) {
-          return res.status(404).json({
-            success: false,
-            message: `No vitals found for patient_id=${patient_id} on date=${today}`
-          });
-        }
+      async (err, vitals) => {
+        if (err) return res.status(500).json({ success: false, message: "Error fetching vitals", error: err.message });
+        if (vitals.length === 0) return res.status(404).json({ success: false, message: `No vitals found for patient_id=${patient_id} on ${today}` });
 
         const patient_vital_id = vitals[0].id;
 
-        // ✅ Step 3: Check if medicals already exist for today
+        // ✅ Check if already exists for today
         pool.query(
-          `SELECT id FROM patient_all_medicals 
-           WHERE patient_id = ? AND DATE(created_at) = ? LIMIT 1`,
+          `SELECT id FROM patient_all_medicals WHERE patient_id = ? AND DATE(created_at) = ? LIMIT 1`,
           [patient_id, today],
-          (err3, existing) => {
-            if (err3) {
-              return res.status(500).json({
-                success: false,
-                message: "Error checking existing medicals",
-                error: err3.message
-              });
-            }
+          async (err3, existing) => {
+            if (err3) return res.status(500).json({ success: false, message: "Error checking existing medicals", error: err3.message });
+            if (existing.length > 0) return res.status(400).json({ success: false, message: `Medicals for patient_id=${patient_id} already exist for ${today}` });
 
-            if (existing.length > 0) {
-              return res.status(400).json({
-                success: false,
-                message: `Medicals for patient_id=${patient_id} already exist for date=${today}`
-              });
-            }
+            try {
+              // ✅ Save suggestions in respective tables
+              await saveSuggestion("chief_complaints", chief_complaint);
+              await saveSuggestion("history_of_present_illness", history_of_present_illness);
+              await saveSuggestion("history_of_past_illness", history_of_past_illness);
+              await saveSuggestion("examination_general", examination_general);
+              await saveSuggestion("examination_systemic", examination_systemic);
+              await saveSuggestion("examination_local", examination_local);
+              await saveSuggestion("treatment_plan", treatment_plan);
+              await saveSuggestion("advises", advises);
+              await saveSuggestion("extra_notes", extra_notes);
 
-            // ✅ Step 4: Insert the record
-            const insertQuery = `
-              INSERT INTO patient_all_medicals (
+              // ✅ Insert into patient_all_medicals (text only)
+              const insertQuery = `
+                INSERT INTO patient_all_medicals (
+                  patient_id,
+                  chief_complaint,
+                  history_of_present_illness,
+                  history_of_past_illness,
+                  examination_general,
+                  examination_systemic,
+                  examination_local,
+                  treatment_plan,
+                  advises,
+                  extra_notes,
+                  pain_assessment,
+                  patient_vital,
+                  created_at,
+                  updated_at
+                ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, NOW(), NOW())
+              `;
+
+              const values = [
                 patient_id,
                 chief_complaint,
                 history_of_present_illness,
@@ -6417,51 +6544,23 @@ const addPatientMedicals = async (req, res) => {
                 advises,
                 extra_notes,
                 pain_assessment,
-                patient_vital,
-                created_at,
-                updated_at
-              ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, NOW(), NOW())
-            `;
+                patient_vital_id,
+              ];
 
-            const values = [
-              patient_id,
-              chief_complaint,
-              history_of_present_illness,
-              history_of_past_illness,
-              examination_general,
-              examination_systemic,
-              examination_local,
-              treatment_plan,
-              advises,
-              extra_notes,
-              pain_assessment,
-              patient_vital_id,
-            ];
+              pool.query(insertQuery, values, (err2) => {
+                if (err2) return res.status(500).json({ success: false, message: "Insert failed", error: err2.message });
 
-            pool.query(insertQuery, values, (err2, result) => {
-              if (err2) {
-                return res.status(500).json({
-                  success: false,
-                  message: "Insert failed",
-                  error: err2.message
-                });
-              }
-
-              return res.status(200).json({
-                success: true,
-                message: "Patient medicals added successfully",
+                return res.status(200).json({ success: true, message: "Patient medicals added successfully" });
               });
-            });
+            } catch (error) {
+              return res.status(500).json({ success: false, message: "Error saving suggestions", error: error.message });
+            }
           }
         );
       }
     );
   } catch (err) {
-    return res.status(500).json({
-      success: false,
-      message: "Something went wrong",
-      error: err.message
-    });
+    return res.status(500).json({ success: false, message: "Something went wrong", error: err.message });
   }
 };
 
@@ -6910,20 +7009,20 @@ const getAllMedicalData = (req, res) => {
   });
 };
 
-const searchMedicalField = (req, res) => {
+const searchMedicalField = async (req, res) => {
   try {
-    const { field, search } = req.query;
+    const { table, search } = req.query;
 
-    if (!field) {
+    if (!table) {
       return res.status(400).json({
         success: false,
-        message: "Field is required",
+        message: "Table name is required (e.g., chief_complaints, examination_general)"
       });
     }
 
-    // SQL injection prevention - allowed fields check
-    const allowedFields = [
-      "chief_complaint",
+    // ✅ Allow only specific tables for security
+    const allowedTables = [
+      "chief_complaints",
       "history_of_present_illness",
       "history_of_past_illness",
       "examination_general",
@@ -6933,42 +7032,330 @@ const searchMedicalField = (req, res) => {
       "advises",
       "extra_notes"
     ];
-    if (!allowedFields.includes(field)) {
+
+    if (!allowedTables.includes(table)) {
       return res.status(400).json({
         success: false,
-        message: "Invalid field name",
+        message: "Invalid table name"
       });
     }
 
-    let searchQuery = `SELECT DISTINCT ${field} FROM patient_all_medicals`;
-    let params = [];
+    // ✅ Case-insensitive search (if search query is provided)
+    let query = `SELECT text FROM ${table}`;
+    let values = [];
 
-    if (search && search.trim() !== "") {
-      searchQuery += ` WHERE ${field} LIKE ?`;
-      params.push(`%${search}%`);
+    if (search) {
+      query += " WHERE LOWER(text) LIKE ?";
+      values.push(`%${search.toLowerCase()}%`);
     }
 
-    searchQuery += ` LIMIT 10`; // suggestion list short rakhne ke liye
+    query += " ORDER BY text ASC LIMIT 20"; // limit for performance
 
-    pool.query(searchQuery, params, (err, result) => {
+    pool.query(query, values, (err, result) => {
       if (err) {
-        throw err;
+        return res.status(500).json({
+          success: false,
+          message: "Database error",
+          error: err.message
+        });
       }
+
       return res.status(200).json({
         success: true,
-        message: `Suggestions for ${field} fetched successfully`,
+        message : `Suggestion texts from ${table} table`,
         data: result
-          .map(row => row[field])
-          .filter(v => v && v.trim() !== "") // null/empty remove
+      });
+    });
+  } catch (err) {
+    return res.status(500).json({
+      success: false,
+      message: "Something went wrong",
+      error: err.message
+    });
+  }
+};
+
+// create table text
+
+const createAllTableText = async (req, res) => {
+  try {
+    const { table } = req.query; 
+    const { text } = req.body;   
+    
+    //  Allowed tables list (whitelist)
+    const allowedTables = {
+      "chief_complaints": "Chief Complaints",
+      "history_of_present_illness": "History of Present Illness",
+      "history_of_past_illness": "History of Past Illness",
+      "examination_general": "Examination General",
+      "examination_systemic": "Examination Systemic",
+      "examination_local": "Examination Local",
+      "treatment_plan": "Treatment Plan",
+      "advises": "Advises",
+      "extra_notes": "Extra Notes",
+      "illness": "Illnesss"
+    };
+
+    //  Table validation
+    if (!allowedTables[table]) {
+      return res.status(400).json({
+        success: false,
+        message: "Invalid table name"
+      });
+    }
+
+    //  Input validation
+    if (!text || typeof text !== "string") {
+      return res.status(400).json({
+        success: false,
+        message: "Text is required and must be a string"
+      });
+    }
+
+    //  Step 1: Check if already exists (case insensitive)
+    const checkQuery = `SELECT id FROM ${table} WHERE LOWER(text) = LOWER(?) LIMIT 1`;
+    pool.query(checkQuery, [text], (err, rows) => {
+      if (err) {
+        return res.status(500).json({
+          success: false,
+          message: "Database error",
+          error: err.message
+        });
+      }
+
+      if (rows.length > 0) {
+        return res.status(409).json({  // 409 = Conflict
+          success: false,
+          message: "This text already exists in " + allowedTables[table],
+          data: rows[0]
+        });
+      }
+
+      //  Step 2: Insert new record safely
+      const insertQuery = `INSERT INTO ${table} (text) VALUES (?)`;
+      pool.query(insertQuery, [text], (err, result) => {
+        if (err) {
+          return res.status(500).json({
+            success: false,
+            message: "Database error",
+            error: err.message
+          });
+        }
+
+        return res.status(201).json({
+          success: true,
+          message: `${allowedTables[table]} created successfully`,
+          data: { id: result.insertId, text }
+        });
       });
     });
 
-  } catch (error) {
+  } catch (err) {
     return res.status(500).json({
       success: false,
-      message: "Internal Server Error",
-      error: error.message,
+      message: "Something went wrong",
+      error: err.message
     });
+  }
+};
+
+// Generic Get API for all suggestion tables
+
+const getAllTablesText = async (req, res) => {
+  try {
+    const { table } = req.query;
+
+    if (!table) {
+      return res.status(400).json({
+        success: false,
+        message: "Table name is required (e.g., chief_complaints, examination_general)"
+      });
+    }
+
+    //  Allow only specific tables for security
+    const allowedTables = [
+      "chief_complaints",
+      "history_of_present_illness",
+      "history_of_past_illness",
+      "examination_general",
+      "examination_systemic",
+      "examination_local",
+      "treatment_plan",
+      "advises",
+      "extra_notes",
+      "illness"
+    ];
+
+    if (!allowedTables.includes(table)) {
+      return res.status(400).json({
+        success: false,
+        message: "Invalid table name"
+      });
+    }
+
+    const query = `SELECT * FROM ${table} ORDER BY text ASC`;
+
+    pool.query(query, (err, result) => {
+      if (err) {
+        return res.status(500).json({
+          success: false,
+          message: "Database error",
+          error: err.message
+        });
+      }
+
+      return res.status(200).json({
+        success: true,
+        message: `all ${table} data fetched successfully`,
+        data: result
+      });
+    });
+  } catch (err) {
+    return res.status(500).json({
+      success: false,
+      message: "Something went wrong",
+      error: err.message
+    });
+  }
+};
+
+// Edit API for all suggestion tables
+
+const editAllTableText = (req, res) => {
+   const { table } = req.query;  // query se table name
+    const { id } = req.params;    // params se id
+    const { text } = req.body;    // body se new text
+
+    if (!table || !id || !text) {
+      return res.status(400).json({
+        success: false,
+        message: "Table, id and text are required"
+      });
+    }
+
+   const allowedTables = {
+      "chief_complaints": "Chief Complaints",
+      "history_of_present_illness": "History of Present Illness",
+      "history_of_past_illness": "History of Past Illness",
+      "examination_general": "Examination General",
+      "examination_systemic": "Examination Systemic",
+      "examination_local": "Examination Local",
+      "treatment_plan": "Treatment Plan",
+      "advises": "Advises",
+      "extra_notes": "Extra Notes",
+      "illness": "Illnesss"
+    };
+
+  if (!allowedTables[table]) {
+    return res.status(400).json({
+      success: false,
+      message: "Invalid table name",
+    });
+  }
+
+  // check duplicate (excluding same record)
+  pool.query(
+    `SELECT id FROM ${table} WHERE text = ? AND id != ?`,
+    [text, id],
+    (err, results) => {
+      if (err) {
+        console.error("DB Error:", err);
+        return res.status(500).json({
+          success: false,
+          message: "Database error while checking duplicate",
+          error: err.message,
+        });
+      }
+
+      if (results.length > 0) {
+        return res.status(400).json({
+          success: false,
+          message: `This text already exists in ${allowedTables[table]}`,
+          data: { id: results[0].id },
+        });
+      }
+
+      // update
+      pool.query(
+        `UPDATE ${table} SET text = ? WHERE id = ?`,
+        [text, id],
+        (err, result) => {
+          if (err) {
+            console.error("DB Error:", err);
+            return res.status(500).json({
+              success: false,
+              message: "Database error while updating",
+              error: err.message,
+            });
+          }
+
+          if (result.affectedRows === 0) {
+            return res.status(404).json({
+              success: false,
+              message: "Record not found",
+            });
+          }
+
+          return res.status(200).json({
+            success: true,
+            message: `Text updated successfully in ${allowedTables[table]}`,
+            data: { id, text },
+          });
+        }
+      );
+    }
+  );
+};
+
+// Delete API for text
+
+const deleteAllTablesText = async (req, res) => {
+  try {
+    const { table } = req.query;
+    const { id } = req.params;
+
+    if (!table) {
+      return res.status(400).json({ success: false, message: "Table name is required" });
+    }
+    if (!id) {
+      return res.status(400).json({ success: false, message: "Idis required" });
+    }
+
+    // Allowed tables only
+    const allowedTables = {
+      "chief_complaints": true,
+      "history_of_present_illness": true,
+      "history_of_past_illness": true,
+      "examination_general": true,
+      "examination_systemic": true,
+      "examination_local": true,
+      "treatment_plan": true,
+      "advises": true,
+      "extra_notes": true,
+      "illness": true
+
+    };
+
+    if (!allowedTables[table]) {
+      return res.status(400).json({ success: false, message: "Invalid table name" });
+    }
+
+    //  Parameterized query to prevent SQL Injection
+    const query = `DELETE FROM ${table} WHERE id = ?`;
+
+    pool.query(query, [id], (err, result) => {
+      if (err) {
+        return res.status(500).json({ success: false, message: "Database error", error: err.message });
+      }
+
+      if (result.affectedRows === 0) {
+        return res.status(404).json({ success: false, message: "Record not found" });
+      }
+
+      return res.status(200).json({ success: true, message: "Record deleted successfully" });
+    });
+  } catch (err) {
+    return res.status(500).json({ success: false, message: "Something went wrong", error: err.message });
   }
 };
 
@@ -7046,7 +7433,7 @@ const addXrayReport = (req, res) => {
   } catch (error) {
     return res.status(500).json({
       success: false,
-      message: "Unexpected server error",
+      message: "Internal server error",
       error: error.message,
     });
   }
@@ -7054,6 +7441,7 @@ const addXrayReport = (req, res) => {
 
 const addDiagnosis = (req, res)=> {
   const {
+    code,
     diagnosis_text,
     medical_id
   } = req.body;
@@ -7087,11 +7475,11 @@ const addDiagnosis = (req, res)=> {
       const patient_id = result[0].patient_id;
 
       const insertQuery = `
-        INSERT INTO diagnosis (medical_id, patient_id, diagnosis_text)
-        VALUES (?, ?, ?)
+        INSERT INTO diagnosis (medical_id, patient_id, code ,diagnosis_text)
+        VALUES (?,?, ?, ?)
       `;
 
-      const values = [medical_id, patient_id, diagnosis_text];
+      const values = [medical_id, patient_id, code , diagnosis_text];
 
       pool.query(insertQuery, values, function (insertErr, insertResult) {
         if (insertErr) {
@@ -7117,21 +7505,25 @@ const addDiagnosis = (req, res)=> {
   }
 }
 
-const addPrescription = (req, res)=> {
+const addPrescription = (req, res) => {
   const {
-    prescription_id,
-    medical_id
+    medical_id,
+    medicine_name,
+    dose,
+    frequency,
+    duration,
+    notes
   } = req.body;
 
-  if (!prescription_id || !medical_id) {
+  if (!medical_id || !medicine_name) {
     return res.status(400).json({
       success: false,
-      message: "Missing required fields: prescription_text and medical_id are required.",
+      message: "Missing required fields: medical_id and medicine_name are required.",
     });
   }
 
   try {
-    const fetchQuery = `SELECT * FROM patient_all_medicals WHERE id = ?`;
+    const fetchQuery = `SELECT patient_id FROM patient_all_medicals WHERE id = ?`;
 
     pool.query(fetchQuery, [medical_id], function (err, result) {
       if (err) {
@@ -7152,11 +7544,12 @@ const addPrescription = (req, res)=> {
       const patient_id = result[0].patient_id;
 
       const insertQuery = `
-        INSERT INTO prescriptions (medical_id, patient_id, prescription_id)
-        VALUES (?, ?, ?)
+        INSERT INTO prescriptions 
+        (medical_id, patient_id, medicine_name, dose, frequency, duration, notes)
+        VALUES (?, ?, ?, ?, ?, ?, ?)
       `;
 
-      const values = [medical_id, patient_id, prescription_id];
+      const values = [medical_id, patient_id, medicine_name, dose, frequency, duration, notes];
 
       pool.query(insertQuery, values, function (insertErr, insertResult) {
         if (insertErr) {
@@ -7170,6 +7563,7 @@ const addPrescription = (req, res)=> {
         return res.status(201).json({
           success: true,
           message: "Prescription added successfully",
+          prescription_id: insertResult.insertId,
         });
       });
     });
@@ -7180,7 +7574,7 @@ const addPrescription = (req, res)=> {
       error: error.message,
     });
   }
-}
+};
 
 const addChronicIllness = async (req, res) => {
   const { medical_id, illness_text } = req.body;
@@ -7225,44 +7619,63 @@ const addChronicIllness = async (req, res) => {
 };
 
 const addPatientAllergy = async (req, res) => {
-  const { medical_id, allergy_text } = req.body;
+  const { medical_id, name, type } = req.body;
 
-  if (!medical_id || !allergy_text) {
+  if (!medical_id || !name || !type) {
     return res.status(400).json({
       success: false,
-      message: "medical_id, allergy_text and status are required",
+      message: "medical_id, name and type are required",
     });
   }
 
-  const getPatientQuery = `SELECT patient_id FROM patient_all_medicals WHERE id = ?`;
+  try {
+    const getPatientQuery = `SELECT patient_id FROM patient_all_medicals WHERE id = ?`;
 
-  pool.query(getPatientQuery, [medical_id], (err, result) => {
-    if (err) {
-      return res.status(500).json({ success: false, message: "Database error", error: err.message });
-    }
-
-    if (result.length === 0) {
-      return res.status(404).json({ success: false, message: "Medical record not found" });
-    }
-
-    const patient_id = result[0].patient_id;
-
-    const insertQuery = `
-      INSERT INTO patient_allergies (medical_id, patient_id, allergy_text)
-      VALUES (?, ?, ?)
-    `;
-
-    pool.query(insertQuery, [medical_id, patient_id, allergy_text], (insertErr, insertResult) => {
-      if (insertErr) {
-        return res.status(500).json({ success: false, message: "Failed to add allergy", error: insertErr.message });
+    pool.query(getPatientQuery, [medical_id], (err, result) => {
+      if (err) {
+        return res.status(500).json({
+          success: false,
+          message: "Database error",
+          error: err.message,
+        });
       }
 
-      return res.status(201).json({
-        success: true,
-        message: "Allergy added successfully",
+      if (result.length === 0) {
+        return res.status(404).json({
+          success: false,
+          message: "Medical record not found",
+        });
+      }
+
+      const patient_id = result[0].patient_id;
+
+      const insertQuery = `
+        INSERT INTO patient_allergies (medical_id, patient_id, allergy_name, allergy_type)
+        VALUES (?, ?, ?, ?)
+      `;
+
+      pool.query(insertQuery, [medical_id, patient_id, name, type], (insertErr, insertResult) => {
+        if (insertErr) {
+          return res.status(500).json({
+            success: false,
+            message: "Failed to add allergy",
+            error: insertErr.message,
+          });
+        }
+
+        return res.status(201).json({
+          success: true,
+          message: "Allergy added successfully",
+        });
       });
     });
-  });
+  } catch (error) {
+    return res.status(500).json({
+      success: false,
+      message: "Unexpected server error",
+      error: error.message,
+    });
+  }
 };
 
 export default {
@@ -7309,6 +7722,7 @@ export default {
   recordPatientDiagnosis,
   getDiagnosisByPatientId,
   addRxMedicine,
+  getAllIcd10List,
   getAllRxList,
   getRxById,
   deleteRxMedicine,
@@ -7327,6 +7741,7 @@ export default {
   deleteService,
   addLabService,
   getAllLabServices,
+  editLabServices,
   deleteLabService,
   getNationalitiesList,
   getDiagnosisList,
@@ -7371,6 +7786,10 @@ export default {
   getMedicalRecordsByDate,
   getAllMedicalData,
   searchMedicalField,
+  createAllTableText,
+  getAllTablesText,
+  editAllTableText,
+  deleteAllTablesText,
   addXrayReport,
   addDiagnosis,
 addPrescription,
