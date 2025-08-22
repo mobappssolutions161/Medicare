@@ -440,23 +440,42 @@ const updateDoctorDetails = async (req, res) => {
       });
     }
 
-    const {
-      email, // user table
-      ...doctorFields // rest for doctor table
+    let {
+      email,          // users table
+      fullName,
+      shortName,
+      prefix,
+      dateOfBirth,
+      licenseId,
+      civilId,
+      passport,
+      gender,
+      specialty,
+      phoneNumber
     } = req.body;
 
-    // Step 1: Get user_id from doctor table
-    const getUserIdQuery = "SELECT user_id FROM doctors WHERE id = ?";
-    pool.query(getUserIdQuery, [doctorId], (err, result) => {
-      if (err || result.length === 0) {
-        return res.status(404).json({
+    const personalPhoto = req.file ? req.file.filename : null;
+
+    // Step 1: Get user_id from doctors table
+    const getDoctorQuery = "SELECT * FROM doctors WHERE id = ?";
+    pool.query(getDoctorQuery, [doctorId], (err, result) => {
+      if (err) {
+        return res.status(500).json({
           success: false,
-          message: "Doctor not found",
-          error: err?.message,
+          message: "Error fetching doctor",
+          error: err.message,
         });
       }
 
-      const userId = result[0].user_id;
+      if (result.length === 0) {
+        return res.status(404).json({
+          success: false,
+          message: "Doctor not found",
+        });
+      }
+
+      const doctor = result[0];
+      const userId = doctor.user_id;
 
       // Step 2: Update users table if email provided
       if (email) {
@@ -472,20 +491,37 @@ const updateDoctorDetails = async (req, res) => {
         });
       }
 
-      // Step 3: Dynamically build UPDATE for doctor fields
-      const keys = Object.keys(doctorFields);
-      if (keys.length === 0) {
-        return res.status(400).json({
-          success: false,
-          message: "No doctor fields provided to update",
-        });
-      }
+      // Step 3: Update doctors table with new or existing values
+      const updateDoctorQuery = `
+        UPDATE doctors SET
+          fullName = ?,
+          shortName = ?,
+          prefix = ?,
+          dateOfBirth = ?,
+          licenseId = ?,
+          civilId = ?,
+          passport = ?,
+          gender = ?,
+          specialty = ?,
+          phoneNumber = ?,
+          personalPhoto = ?
+        WHERE id = ?
+      `;
 
-      const fieldsToUpdate = keys.map((key) => `${key} = ?`).join(", ");
-      const values = keys.map((key) => doctorFields[key]);
-
-      const updateDoctorQuery = `UPDATE doctors SET ${fieldsToUpdate} WHERE id = ?`;
-      values.push(doctorId); // add doctorId at the end
+      const values = [
+        fullName || doctor.fullName,
+        shortName || doctor.shortName,
+        prefix || doctor.prefix,
+        dateOfBirth || doctor.dateOfBirth,
+        licenseId || doctor.licenseId,
+        civilId || doctor.civilId,
+        passport || doctor.passport,
+        gender || doctor.gender,
+        specialty || doctor.specialty,
+        phoneNumber || doctor.phoneNumber,
+        personalPhoto || doctor.personalPhoto,
+        doctorId,
+      ];
 
       pool.query(updateDoctorQuery, values, (err) => {
         if (err) {

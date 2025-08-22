@@ -62,6 +62,7 @@ router.delete("/deletePatientVital/:id/:patientId", adminController.deletePatien
 router.post("/recordPatientDiagnosis", adminController.recordPatientDiagnosis)
 router.get("/getDiagnosisByPatientId/:patientId", adminController.getDiagnosisByPatientId)
 
+router.post("/addICD10", adminController.addICD10)
 router.get("/getAllIcd10List", adminController.getAllIcd10List)
 
 router.post("/addRxMedicine", adminController.addRxMedicine)
@@ -138,6 +139,7 @@ router.get('/getAllMedicalDataByPatient/:patient_id', adminController.getAllMedi
 router.post('/getMedicalRecordsByDate/:patient_id', adminController.getMedicalRecordsByDate);
 router.get('/getAllMedicalData', adminController.getAllMedicalData);
 router.post('/searchMedicalField', adminController.searchMedicalField);
+router.get('/searchICD10', adminController.searchICD10);
 
 
 router.post('/createAllTableText', adminController.createAllTableText);
