@@ -115,6 +115,8 @@ const userLogin = async (req, res) => {
                         });
                     } else {
                         const user = result[0];
+                        console.log(user);
+                        
                         let doctorName = null;
 
                         // Fetch doctor name for any role (if exists)
@@ -129,7 +131,7 @@ const userLogin = async (req, res) => {
                             if (doctorResult.length > 0) {
                                 doctorName = doctorResult[0].fullName;
                             }
-
+                            let doctorData =  doctorResult[0]
                             const payload = {
                                 id: user.id,
                                 email: user.email,
@@ -142,8 +144,7 @@ const userLogin = async (req, res) => {
                                 success: true,
                                 message: `${user.role} login successfully`,
                                 token,
-                                role: user.role,
-                                name: doctorName 
+                                data: {...user,...doctorData},
                             });
                         });
                     }

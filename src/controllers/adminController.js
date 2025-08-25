@@ -6818,14 +6818,12 @@ const getMedicalDataWithVitals = (req, res) => {
     }
 
     const row = results[0];
-    console.log(row)
     const {
       vitals_id, gender, age, doctor_id, recorded_at, blood_pressure,
       respiratory_rate, pulse, spo2, rbs_mg, rbs_nmol, bp_position,
       temperature, weight, height, bmi, risk_of_fall, urgency, notes, nurse,
       ...medicalData
     } = row;
-
 
     const vitals = {
       id: vitals_id,
@@ -6849,11 +6847,17 @@ const getMedicalDataWithVitals = (req, res) => {
       notes,
       nurse
     };
-    // console.log(vitals);
-    
+
     // ✅ patient_id based queries (all medicals)
     const diagnosisQuery = `SELECT * FROM diagnosis WHERE patient_id = ?`;
-    const prescriptionQuery = `SELECT * FROM prescriptions WHERE patient_id = ?`;
+    const prescriptionQuery = `
+      SELECT pg.id AS group_id, pg.doctor_id, pg.created_at AS group_created_at,
+             p.id AS prescription_id, p.medicine_name, p.dose, p.frequency, p.duration, p.notes
+      FROM prescription_groups pg
+      LEFT JOIN prescriptions p ON pg.id = p.prescription_group_id
+      WHERE pg.patient_id = ?
+      ORDER BY pg.created_at DESC
+    `;
     const allergyQuery = `SELECT * FROM patient_allergies WHERE patient_id = ?`;
     const chronicIllnessQuery = `SELECT * FROM chronic_illness WHERE patient_id = ?`;
     const xRayQuery = `SELECT * FROM xray_and_radiology WHERE patient_id = ?`;
@@ -6861,8 +6865,35 @@ const getMedicalDataWithVitals = (req, res) => {
     pool.query(diagnosisQuery, [patient_id], (err1, diagnosis) => {
       if (err1) return res.status(500).json({ success: false, message: "Error fetching diagnosis", error: err1.message });
 
-      pool.query(prescriptionQuery, [patient_id], (err2, prescriptions) => {
+      pool.query(prescriptionQuery, [patient_id], (err2, prescriptionRows) => {
         if (err2) return res.status(500).json({ success: false, message: "Error fetching prescriptions", error: err2.message });
+
+        // ✅ Group prescriptions by group_id (doctor wise + time wise)
+        const prescriptions = [];
+        const groupMap = {};
+
+        prescriptionRows.forEach(row => {
+          if (!groupMap[row.group_id]) {
+            groupMap[row.group_id] = {
+              group_id: row.group_id,
+              doctor_id: row.doctor_id,
+              prescribed_at: row.group_created_at,
+              medicines: []
+            };
+            prescriptions.push(groupMap[row.group_id]);
+          }
+
+          if (row.prescription_id) {
+            groupMap[row.group_id].medicines.push({
+              id: row.prescription_id,
+              medicine_name: row.medicine_name,
+              dose: row.dose,
+              frequency: row.frequency,
+              duration: row.duration,
+              notes: row.notes
+            });
+          }
+        });
 
         pool.query(allergyQuery, [patient_id], (err3, allergies) => {
           if (err3) return res.status(500).json({ success: false, message: "Error fetching allergies", error: err3.message });
@@ -6880,7 +6911,7 @@ const getMedicalDataWithVitals = (req, res) => {
                   ...medicalData,
                   vitals,
                   diagnosis,
-                  prescriptions,   // ✅ direct prescriptions (no enrichment)
+                  prescriptions,   // ✅ now grouped by doctor + time
                   allergies,
                   chronic_illnesses: chronicIllnesses,
                   xRay_and_radiology: xRay
@@ -7751,17 +7782,91 @@ const addDiagnosis = (req, res)=> {
   }
 }
 
-const addPrescription = (req, res) => {
-  const { medical_id, prescriptions } = req.body;
+// const addPrescription = (req, res) => {
+//   const { medical_id, prescriptions } = req.body;
 
-  if (!medical_id || !Array.isArray(prescriptions) || prescriptions.length === 0) {
+//   if (!medical_id || !Array.isArray(prescriptions) || prescriptions.length === 0) {
+//     return res.status(400).json({
+//       success: false,
+//       message: "medical_id and prescriptions array are required.",
+//     });
+//   }
+
+//   try {
+//     const fetchQuery = `SELECT patient_id FROM patient_all_medicals WHERE id = ?`;
+
+//     pool.query(fetchQuery, [medical_id], function (err, result) {
+//       if (err) {
+//         return res.status(500).json({
+//           success: false,
+//           message: "Database error while fetching patient_id",
+//           error: err.message,
+//         });
+//       }
+
+//       if (result.length === 0) {
+//         return res.status(404).json({
+//           success: false,
+//           message: "No record found with this medical_id.",
+//         });
+//       }
+
+//       const patient_id = result[0].patient_id;
+
+//       // prescriptions array ko format karo
+//       const values = prescriptions.map((p) => [
+//         medical_id,
+//         patient_id,
+//         p.medicine_name,
+//         p.dose,
+//         p.frequency,
+//         p.duration,
+//         p.notes || null, // agar notes null ho sakta hai
+//       ]);
+
+//       const insertQuery = `
+//         INSERT INTO prescriptions 
+//         (medical_id, patient_id, medicine_name, dose, frequency, duration, notes)
+//         VALUES ?
+//       `;
+
+//       pool.query(insertQuery, [values], function (insertErr, insertResult) {
+//         if (insertErr) {
+//           return res.status(500).json({
+//             success: false,
+//             message: "Failed to add prescriptions",
+//             error: insertErr.message,
+//           });
+//         }
+
+//         return res.status(201).json({
+//           success: true,
+//           message: "Prescriptions added successfully",
+//           inserted_count: insertResult.affectedRows,
+//         });
+//       });
+//     });
+//   } catch (error) {
+//     return res.status(500).json({
+//       success: false,
+//       message: "Unexpected server error",
+//       error: error.message,
+//     });
+//   }
+// };
+
+const addPrescription = (req, res) => {
+  const { medical_id, doctor_id, prescriptions } = req.body;
+
+  if (!medical_id || !doctor_id || !Array.isArray(prescriptions) || prescriptions.length === 0) {
     return res.status(400).json({
       success: false,
-      message: "medical_id and prescriptions array are required.",
+      message: "medical_id, doctor_id and prescriptions array are required.",
     });
   }
 
   try {
+    // Step 1: Get patient_id using medical_id
     const fetchQuery = `SELECT patient_id FROM patient_all_medicals WHERE id = ?`;
 
     pool.query(fetchQuery, [medical_id], function (err, result) {
@@ -7782,36 +7887,59 @@ const addPrescription = (req, res) => {
 
       const patient_id = result[0].patient_id;
 
-      // prescriptions array ko format karo
-      const values = prescriptions.map((p) => [
-        medical_id,
-        patient_id,
-        p.medicine_name,
-        p.dose,
-        p.frequency,
-        p.duration,
-        p.notes || null, // agar notes null ho sakta hai
-      ]);
-
-      const insertQuery = `
-        INSERT INTO prescriptions 
-        (medical_id, patient_id, medicine_name, dose, frequency, duration, notes)
-        VALUES ?
+      // Step 2: Insert into prescription_groups
+      const groupQuery = `
+        INSERT INTO prescription_groups (patient_id, doctor_id, medical_id)
+        VALUES (?, ?, ?)
       `;
 
-      pool.query(insertQuery, [values], function (insertErr, insertResult) {
-        if (insertErr) {
+      pool.query(groupQuery, [patient_id, doctor_id, medical_id], function (groupErr, groupResult) {
+        if (groupErr) {
           return res.status(500).json({
             success: false,
-            message: "Failed to add prescriptions",
-            error: insertErr.message,
+            message: "Failed to create prescription group",
+            error: groupErr.message,
           });
         }
 
-        return res.status(201).json({
-          success: true,
-          message: "Prescriptions added successfully",
-          inserted_count: insertResult.affectedRows,
+        const prescription_group_id = groupResult.insertId;
+
+        // Step 3: Prepare prescriptions array with new DB fields
+        const values = prescriptions.map((p) => [
+          prescription_group_id,
+          medical_id,
+          patient_id,
+          p.medicine_name,
+          p.strength || null,
+          p.frequency || null,
+          p.dose || null,
+          p.duration || null,
+          p.route || null,
+          p.substance || null,
+          p.notes || null,
+        ]);
+
+        const insertQuery = `
+          INSERT INTO prescriptions 
+          (prescription_group_id, medical_id, patient_id, medicine_name, strength, frequency, dose, duration, route, substance, notes)
+          VALUES ?
+        `;
+
+        pool.query(insertQuery, [values], function (insertErr, insertResult) {
+          if (insertErr) {
+            return res.status(500).json({
+              success: false,
+              message: "Failed to add prescriptions",
+              error: insertErr.message,
+            });
+          }
+
+          return res.status(201).json({
+            success: true,
+            message: "Prescriptions added successfully",
+            group_id: prescription_group_id,
+            inserted_count: insertResult.affectedRows,
+          });
         });
       });
     });
