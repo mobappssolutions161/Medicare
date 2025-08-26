@@ -115,8 +115,7 @@ const userLogin = async (req, res) => {
                         });
                     } else {
                         const user = result[0];
-                        console.log(user);
-                        
+
                         let doctorName = null;
 
                         // Fetch doctor name for any role (if exists)
@@ -165,50 +164,111 @@ const userLogin = async (req, res) => {
 const changePassword = async (req, res) => {
   try {
     const { id } = req.params;
-    if(!id){
-      return res.status(400).json({
-        success :  false,
-        message : "Id required"
-      })
-    }
     const { oldPassword, newPassword, confirmNewPassword } = req.body;
 
-    if (!id || !oldPassword || !newPassword || !confirmNewPassword) {
+    // Step 1: Validate inputs
+    if (!id) {
       return res.status(400).json({
         success: false,
-        message: "All fields are required",
+        message: "Id required",
+      });
+    }
+
+    if (!oldPassword || !newPassword || !confirmNewPassword) {
+      return res.status(400).json({
+        success: false,
+        message: "All fields are required (oldPassword, newPassword, confirmNewPassword)",
       });
     }
 
     if (oldPassword === newPassword) {
-      return res.status(400).json({ success: false, message: "New password must be different from old password" });
+      return res.status(400).json({
+        success: false,
+        message: "New password must be different from old password",
+      });
     }
 
     if (newPassword !== confirmNewPassword) {
-      return res.status(400).json({ success: false, message: "New passwords do not match" });
+      return res.status(400).json({
+        success: false,
+        message: "New passwords do not match",
+      });
     }
 
-    const sql = "SELECT * FROM users WHERE id = ?";
-    pool.query(sql, [id], async (error, result) => {
-      if (error) throw error;
-
-      if (result.length === 0) {
-        return res.status(404).json({ success: false, message: "User not found" });
+    // Step 2: Get user_id from doctors table
+    const getDoctorQuery = "SELECT user_id FROM doctors WHERE id = ?";
+    pool.query(getDoctorQuery, [id], (err, doctorResult) => {
+      if (err) {
+        return res.status(500).json({
+          success: false,
+          message: "Error fetching doctor info",
+          error: err.message,
+        });
       }
 
-      const isValid = await bcrypt.compare(oldPassword, result[0].password);
-      if (!isValid) {
-        return res.status(400).json({ success: false, message: "Old password is incorrect" });
+      if (!doctorResult || doctorResult.length === 0) {
+        return res.status(404).json({
+          success: false,
+          message: "Doctor not found",
+        });
       }
 
-      const hashedPassword = await bcrypt.hash(newPassword, 10);
-      pool.query("UPDATE users SET password = ? WHERE id = ?", [hashedPassword, id], (err) => {
-        if (err) throw err;
-        res.status(200).json({ success: true, message: "Password changed successfully" });
+      const userId = doctorResult[0].user_id;
+
+      // Step 3: Get user from users table
+      const getUserQuery = "SELECT * FROM users WHERE id = ?";
+      pool.query(getUserQuery, [userId], async (err, userResult) => {
+        if (err) {
+          return res.status(500).json({
+            success: false,
+            message: "Error fetching user",
+            error: err.message,
+          });
+        }
+
+        if (!userResult || userResult.length === 0) {
+          return res.status(404).json({
+            success: false,
+            message: "Associated user not found",
+          });
+        }
+
+        const user = userResult[0];
+
+        // Step 4: Validate old password
+        const isValid = await bcrypt.compare(oldPassword, user.password);
+        if (!isValid) {
+          return res.status(400).json({
+            success: false,
+            message: "Old password is incorrect",
+          });
+        }
+
+        // Step 5: Update password
+        const hashedPassword = await bcrypt.hash(newPassword, 10);
+        const updatePasswordQuery = "UPDATE users SET password = ? WHERE id = ?";
+        pool.query(updatePasswordQuery, [hashedPassword, userId], (err) => {
+          if (err) {
+            return res.status(500).json({
+              success: false,
+              message: "Error updating password",
+              error: err.message,
+            });
+          }
+
+          return res.status(200).json({
+            success: true,
+            message: "Password changed successfully",
+          });
+        });
       });
     });
   } catch (error) {
-    res.status(500).json({ success: false, message: "Internal server error", error: error.message });
+    return res.status(500).json({
+      success: false,
+      message: "Internal Server Error",
+      error: error.message,
+    });
   }
 };
 
@@ -288,40 +348,102 @@ const userVerifyOtp = async (req, res) => {
 
 const userResetPassword = async (req, res) => {
   try {
-    const { id } = req.params;
-     if(!id){
+    const { id } = req.params; // here id = doctorId
+    if (!id) {
       return res.status(400).json({
-        success :  false,
-        message : "Id required"
-      })
+        success: false,
+        message: "Id required",
+      });
     }
+
     const { newPassword, confirmNewPassword } = req.body;
 
-    if (!id || !newPassword || !confirmNewPassword) {
-      return res.status(400).json({ success: false, message: "All fields are required" });
+    if (!newPassword || !confirmNewPassword) {
+      return res.status(400).json({
+        success: false,
+        message: "All fields are required",
+      });
     }
 
     if (newPassword !== confirmNewPassword) {
-      return res.status(400).json({ success: false, message: "Passwords do not match" });
+      return res.status(400).json({
+        success: false,
+        message: "Passwords do not match",
+      });
     }
 
-    pool.query("SELECT * FROM users WHERE id = ?", [id], async (error, result) => {
-      if (error) throw error;
-      if (result.length === 0) return res.status(404).json({ success: false, message: "User not found" });
-
-      const isSame = await bcrypt.compare(newPassword, result[0].password);
-      if (isSame) {
-        return res.status(400).json({ success: false, message: "New password must be different from old password" });
+    // Step 1: Get user_id from doctors table
+    const getDoctorQuery = "SELECT user_id FROM doctors WHERE id = ?";
+    pool.query(getDoctorQuery, [id], (err, doctorResult) => {
+      if (err) {
+        return res.status(500).json({
+          success: false,
+          message: "Error fetching doctor info",
+          error: err.message,
+        });
       }
 
-      const hashedPassword = await bcrypt.hash(newPassword, 10);
-      pool.query("UPDATE users SET password = ? WHERE id = ?", [hashedPassword, id], (err) => {
-        if (err) throw err;
-        res.status(200).json({ success: true, message: "Password reset successfully" });
+      if (!doctorResult || doctorResult.length === 0) {
+        return res.status(404).json({
+          success: false,
+          message: "Doctor not found",
+        });
+      }
+
+      const userId = doctorResult[0].user_id;
+
+      // Step 2: Get user from users table
+      const getUserQuery = "SELECT * FROM users WHERE id = ?";
+      pool.query(getUserQuery, [userId], async (error, result) => {
+        if (error) {
+          return res.status(500).json({
+            success: false,
+            message: "Error fetching user",
+            error: error.message,
+          });
+        }
+
+        if (result.length === 0) {
+          return res.status(404).json({
+            success: false,
+            message: "Associated user not found",
+          });
+        }
+
+        // Step 3: Check if new password is same as old one
+        const isSame = await bcrypt.compare(newPassword, result[0].password);
+        if (isSame) {
+          return res.status(400).json({
+            success: false,
+            message: "New password must be different from old password",
+          });
+        }
+
+        // Step 4: Update password
+        const hashedPassword = await bcrypt.hash(newPassword, 10);
+        const updatePasswordQuery = "UPDATE users SET password = ? WHERE id = ?";
+        pool.query(updatePasswordQuery, [hashedPassword, userId], (err) => {
+          if (err) {
+            return res.status(500).json({
+              success: false,
+              message: "Error updating password",
+              error: err.message,
+            });
+          }
+
+          return res.status(200).json({
+            success: true,
+            message: "Password reset successfully",
+          });
+        });
       });
     });
   } catch (error) {
-    res.status(500).json({ success: false, message: "Internal server error", error: error.message });
+    return res.status(500).json({
+      success: false,
+      message: "Internal server error",
+      error: error.message,
+    });
   }
 };
 

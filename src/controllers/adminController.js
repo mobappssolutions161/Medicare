@@ -6016,6 +6016,7 @@ const deleteLabRequestAttachment = async (req, res) => {
   }
 };
 
+// post service category 
 const serviceCategory =  async(req,res)=>{
   try {
     const category_name = req.body.category_name
@@ -6065,6 +6066,7 @@ const serviceCategory =  async(req,res)=>{
   }
 }
 
+// get all service category
 const getAllServiceCategories = (req, res) => {
   const query = "SELECT * FROM service_categories ORDER BY id DESC";
 
@@ -6092,6 +6094,7 @@ const getAllServiceCategories = (req, res) => {
   });
 };
 
+// update service category
 const updateServiceCategory = (req, res) => {
   const categoryId = req.params.categoryId;
   const { category_name } = req.body;
@@ -6127,6 +6130,7 @@ const updateServiceCategory = (req, res) => {
   });
 };
 
+// delete service category
 const deleteServiceCategory = (req, res) => {
   const categoryId = req.params.categoryId;
 
@@ -6154,6 +6158,7 @@ const deleteServiceCategory = (req, res) => {
   });
 };
 
+// post allergy
 const createAllergy = (req, res) => {
   const { name, description } = req.body;
 
@@ -6206,6 +6211,7 @@ const createAllergy = (req, res) => {
   });
 };
 
+// get allergy
 const getAllAllergies = (req, res) => {
   const query = "SELECT * FROM allergies ORDER BY id DESC";
 
@@ -6233,6 +6239,7 @@ const getAllAllergies = (req, res) => {
   });
 };
 
+// update allergy
 const updateAllergy = async (req, res) => {
   try {
     const { allergyId } = req.params;
@@ -6279,6 +6286,7 @@ const updateAllergy = async (req, res) => {
   }
 };
 
+// delete allergy
 const deleteAllergy = (req, res) => {
   const allergyId = req.params.allergyId;
 
@@ -8055,7 +8063,302 @@ const addPatientAllergy = async (req, res) => {
   }
 };
 
+// INSURANCE Section
+
+// Add insurance 
+const addInsurance = async (req, res) => {
+  const { date, company, patient_id, services, amount } = req.body;
+
+  //  Basic validation
+  if (!date || !company || !patient_id || !services || !amount) {
+    return res.status(400).json({
+      success: false,
+      message: "date, company, patient_id, services, and amount are required",
+    });
+  }
+
+  try {
+    //  Optional check: Prevent duplicate insurance entry for same patient + service + date
+    const checkQuery = `SELECT * FROM insurance WHERE patient_id = ? AND services = ? AND date = ?`;
+    pool.query(checkQuery, [patient_id, services, date], (checkErr, checkResult) => {
+      if (checkErr) {
+        return res.status(500).json({
+          success: false,
+          message: "DB error",
+          error: checkErr.message,
+        });
+      }
+
+      if (checkResult.length > 0) {
+        return res.status(409).json({
+          success: false,
+          message: "Insurance record already exists for this patient, service, and date",
+        });
+      }
+
+      //  Generate claim number
+      const randomPart = Math.floor(1000 + Math.random() * 9000); // 4-digit random
+      const claim_no = `CLM-${randomPart}`;
+
+      //  Insert insurance record (status auto = Pending)
+      const insertQuery = `
+        INSERT INTO insurance (date, company, patient_id, services, amount, claim_no)
+        VALUES (?, ?, ?, ?, ?, ?)
+      `;
+
+      pool.query(
+        insertQuery,
+        [date, company, patient_id, services, amount, claim_no],
+        (err, result) => {
+          if (err) {
+            return res.status(500).json({
+              success: false,
+              message: "Insert error",
+              error: err.message,
+            });
+          }
+
+          return res.status(201).json({
+            success: true,
+            message: "Insurance added successfully",
+            insuranceId: result.insertId,
+            claim_no
+          });
+        }
+      );
+    });
+  } catch (error) {
+    return res.status(500).json({
+      success: false,
+      message: "Server error",
+      error: error.message,
+    });
+  }
+};
+
+// Get Insurance 
+const getInsurance = async (req, res) => {
+  const { patient_id } = req.query; // optional filter
+
+  try {
+    let query = `
+      SELECT 
+        i.*,
+        CONCAT_WS(' ', p.firstName, p.middleName, p.lastName) AS patient_name
+      FROM insurance i
+      JOIN patients p ON i.patient_id = p.id
+    `;
+    let values = [];
+
+    if (patient_id) {
+      query += ` WHERE i.patient_id = ?`;
+      values.push(patient_id);
+    }
+
+    pool.query(query, values, (err, results) => {
+      if (err) {
+        return res.status(500).json({
+          success: false,
+          message: "DB error",
+          error: err.message,
+        });
+      }
+
+      if (results.length === 0) {
+        return res.status(404).json({
+          success: false,
+          message: "No insurance records found",
+        });
+      }
+
+      return res.status(200).json({
+        success: true,
+        message: "Insurance records fetched successfully",
+        data: results,
+      });
+    });
+  } catch (error) {
+    return res.status(500).json({
+      success: false,
+      message: "Server error",
+      error: error.message,
+    });
+  }
+};
+
+// Update Insurance
+const updateInsurance = (req, res) => {
+  const { id } = req.params;
+  const { date, company, services, amount } = req.body;
+
+  if (!id) {
+    return res.status(400).json({
+      success: false,
+      message: "Insurance ID is required",
+    });
+  }
+
+  // Step 1: Fetch the existing record
+  const fetchQuery = `SELECT * FROM insurance WHERE id = ?`;
+  pool.query(fetchQuery, [id], (err, existingData) => {
+    if (err) {
+      return res.status(500).json({
+        success: false,
+        message: "Fetch error",
+        error: err.message,
+      });
+    }
+
+    if (existingData.length === 0) {
+      return res.status(404).json({
+        success: false,
+        message: "Insurance record not found",
+      });
+    }
+
+    // Step 2: Use new values if provided, else keep old values
+    const updatedDate = date || existingData[0].date;
+    const updatedCompany = company || existingData[0].company;
+    const updatedServices = services || existingData[0].services;
+    const updatedAmount = amount || existingData[0].amount;
+
+    // Step 3: Update the record
+    const updateQuery = `
+      UPDATE insurance 
+      SET 
+        date = ?, 
+        company = ?, 
+        services = ?, 
+        amount = ?, 
+        updated_at = CURRENT_TIMESTAMP
+      WHERE id = ?
+    `;
+
+    pool.query(
+      updateQuery,
+      [updatedDate, updatedCompany, updatedServices, updatedAmount, id],
+      (err, result) => {
+        if (err) {
+          return res.status(500).json({
+            success: false,
+            message: "Update failed",
+            error: err.message,
+          });
+        }
+
+        return res.status(200).json({
+          success: true,
+          message: "Insurance details updated successfully",
+        });
+      }
+    );
+  });
+};
+
+// Delete insurance
+const deleteInsurance = async (req, res) => {
+  const { id } = req.params; // insurance id from URL
+
+  if (!id) {
+    return res.status(400).json({
+      success: false,
+      message: "Insurance ID is required",
+    });
+  }
+
+  try {
+    const deleteQuery = `DELETE FROM insurance WHERE id = ?`;
+
+    pool.query(deleteQuery, [id], (err, result) => {
+      if (err) {
+        return res.status(500).json({
+          success: false,
+          message: "DB error",
+          error: err.message,
+        });
+      }
+
+      if (result.affectedRows === 0) {
+        return res.status(404).json({
+          success: false,
+          message: "Insurance record not found",
+        });
+      }
+
+      return res.status(200).json({
+        success: true,
+        message: "Insurance record deleted successfully",
+      });
+    });
+  } catch (error) {
+    return res.status(500).json({
+      success: false,
+      message: "Server error",
+      error: error.message,
+    });
+  }
+};
+
+// Update insurance status
+const updateInsuranceStatus = async (req, res) => {
+  const { id } = req.params;
+  const { status } = req.body;
+
+  if (!id || !status) {
+    return res.status(400).json({
+      success: false,
+      message: "Insurance ID and status are required",
+    });
+  }
+
+  const validStatuses = ["Not Sent","Sent"];
+  if (!validStatuses.includes(status)) {
+    return res.status(400).json({
+      success: false,
+      message: "Invalid status. Must be Pending, Approved, or Rejected",
+    });
+  }
+
+  try {
+    const updateQuery = `
+      UPDATE insurance 
+      SET status = ?, updated_at = CURRENT_TIMESTAMP
+      WHERE id = ?
+    `;
+
+    pool.query(updateQuery, [status, id], (err, result) => {
+      if (err) {
+        return res.status(500).json({
+          success: false,
+          message: "DB error",
+          error: err.message,
+        });
+      }
+
+      if (result.affectedRows === 0) {
+        return res.status(404).json({
+          success: false,
+          message: "Insurance record not found",
+        });
+      }
+
+      return res.status(200).json({
+        success: true,
+        message: `Insurance status updated to ${status}`,
+      });
+    });
+  } catch (error) {
+    return res.status(500).json({
+      success: false,
+      message: "Server error",
+      error: error.message,
+    });
+  }
+};
+
 export default {
+  
+  // users apis 
   getAllUsers,
   changeUserStatus,
   deleteUserById,
@@ -8067,62 +8370,87 @@ export default {
   changeUserStatus,
   softDeleteUser,
   deleteDoctor,
+
+  // patient apis
   registerPatient,
   getAllPatients,
-  editAppointment,
-  editAppointmentByPatientId,
   getPatientById,
   updatePatient,
+  deletePatient,
+
+  // Patient service apis
   AddPatientServices,
   GetPatientServices,
   DeletePatientService,
-  deletePatient,
+  
+  // appointment apis
   createAppointment,
   getAllAppointments,
+  editAppointment,
   getUpcomingAppointment,
   getWaitingAppointments,
   getConfirmedAppointments,
   deleteAppointments,
+  
+  
   getAllNationalities,
   doctorAvailability,
+  
+  // more appointment apis 
   getAppointmentsByDoctorId,
   appointmentByDoctorId,
   getAppointmentsByDate,
   appointmentByPatientId,
+  editAppointmentByPatientId,
   bookingAppointment,
   changeAppointmentStatus,
   cancelAppointmentStatus,
+
+  // patient vitals apis
   recordPatientVitals,
   getPatientVitalsByPatientId,
   updatePatientVitals,
   deletePatientVital,
   recordPatientDiagnosis,
+
   getDiagnosisByPatientId,
   addRxMedicine,
+  
+  // icd 10 apis
   addICD10,
   getAllIcd10List,
   getAllRxList,
   getRxById,
   deleteRxMedicine,
+
+  // categories apis
   addCategories,
   getAllCategories,
   updateCategory,
   deleteCategory,
+
+  // drug apis
   addDrug,
   getDrugs,
   getDrugById,
   updateDrug,
   deleteDrug,
+
+  // service apis
   addServices,
   getServices,
   updateService,
   deleteService,
+
+  // lab service apis
   addLabService,
   getAllLabServices,
   editLabServices,
   deleteLabService,
   getNationalitiesList,
   getDiagnosisList,
+
+  // labs apis
   addLabs,
   getAllActiveLabs,
   getAllLabs,
@@ -8130,6 +8458,8 @@ export default {
   updateLabById,
   deleteLabById,
   changeLabStatus,
+
+  // Lab request apis
   addLabRequest ,
   getLabRequestsByPatient,
   updateLabRequestStatus,
@@ -8141,23 +8471,33 @@ export default {
   updateLabRequestAttachment,
   getLabRequestAttachmentsByLabRequestId,
   deleteLabRequestAttachment,
+
+  // service category apis
   serviceCategory,
   getAllServiceCategories,
   updateServiceCategory,
   deleteServiceCategory,
+
+  // allergy apis
   createAllergy,
   getAllAllergies,
   updateAllergy,
   deleteAllergy,
+
+  // complainst apis
   addComplaint,
   getAllComplaints,
   updateComplaintById,
   deleteComplaintById,
   searchComplaints,
+
+  // speciality apis
   addSpeciality,
   getAllSpecialities,
   updateSpecialityById,
   deleteSpecialityById,
+
+  // Medical history all apis
   addPatientMedicals ,
   getMedicalDataWithVitals,
   getAllMedicalDataByPatient,
@@ -8165,15 +8505,25 @@ export default {
   getAllMedicalData,
   searchMedicalField,
   searchICD10,
+
+  //  all texts apis
   createAllTableText,
   getAllTablesText,
   editAllTableText,
   deleteAllTablesText,
+
+  // Medical history all table sections
   addXrayReport,
   addDiagnosis,
-addPrescription,
-addChronicIllness,
-addPatientAllergy,
+  addPrescription,
+  addChronicIllness,
+  addPatientAllergy,
 
+  // Insurance section
+  addInsurance,
+  getInsurance,
+  updateInsurance,
+  deleteInsurance,
+  updateInsuranceStatus
 };
 

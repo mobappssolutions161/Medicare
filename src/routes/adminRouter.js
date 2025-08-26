@@ -4,6 +4,8 @@ const router = express.Router()
 import adminController from "../controllers/adminController.js"
 import upload from "../../upload.js"
 
+// User Section
+
 router.get("/getAllUsers", adminController.getAllUsers)
 router.get("/getActiveDoctors", adminController.getActiveDoctors)
 router.get("/getAllStaff", adminController.getAllStaff)
@@ -153,5 +155,13 @@ router.post('/addDiagnosis', adminController.addDiagnosis);
 router.post('/addPrescription', adminController.addPrescription);
 router.post('/addChronicIllness', adminController.addChronicIllness);
 router.post('/addPatientAllergy', adminController.addPatientAllergy);
+
+// Insurance Section
+router.post('/addInsurance', adminController.addInsurance);
+router.get('/getInsurance', adminController.getInsurance);
+router.put('/updateInsurance/:id', adminController.updateInsurance);
+router.delete('/updateInsuranceStatus/:id', adminController.deleteInsurance);
+router.put('/updateInsuranceStatus/:id', adminController.updateInsuranceStatus);
+
 
 export default router;
