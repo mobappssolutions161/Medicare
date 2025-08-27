@@ -1377,28 +1377,93 @@ const updatePatient = async (req, res) => {
 
 const AddPatientServices = async (req, res) => {
   try {
-    const { patientId, doctor_id, serviceId, amount, insurance, vat } =
-      req.body;
+    const { patientId, serviceId, discount_type, discount_value, extra_notes } = req.body;
 
-    const sql = `
-    INSERT INTO patient_services 
-    (patientId, doctor_id, serviceId, amount, insurance, vat)
-    VALUES (?, ?, ?, ?, ?, ?)
-  `;
+    // Step 1: Validation
+    if (!patientId || !serviceId) {
+      return res.status(400).json({
+        success: false,
+        message: "Missing required fields: patientId or serviceId.",
+      });
+    }
 
-    pool.query(
-      sql,
-      [patientId, doctor_id, serviceId, amount, insurance, vat],
-      (err, result) => {
-        if (err) {
-          return res.status(500).json({ success : false, message : "Database error" , error : err.message });
-        }
-        res.status(201).json({
-          message: "Patient service created successfully",
-          id: result.insertId,
-        });
+    // Step 2: Check service and get cost
+    const serviceQuery = `SELECT standardCost FROM services WHERE id = ?`;
+
+    pool.query(serviceQuery, [serviceId], (err, serviceResult) => {
+      if (err) {
+        return res.status(500).json({ success: false, message: "Database error", error: err.message });
       }
-    );
+
+      if (serviceResult.length === 0) {
+        return res.status(404).json({ success: false, message: "Service not found" });
+      }
+
+      const { standardCost } = serviceResult[0];
+
+      // Step 3: Check for duplicate (patientId + serviceId)
+      const duplicateQuery = `SELECT id FROM patient_services WHERE patientId = ? AND serviceId = ?`;
+      pool.query(duplicateQuery, [patientId, serviceId], (dupErr, dupResult) => {
+        if (dupErr) {
+          return res.status(500).json({ success: false, message: "Database error", error: dupErr.message });
+        }
+
+        if (dupResult.length > 0) {
+          return res.status(400).json({ success: false, message: "This service is already added for the patient" });
+        }
+
+        // Step 4: Calculate net amount
+        let netAmount = standardCost;
+
+        if (discount_type === "Amount") {
+          netAmount = standardCost - discount_value;
+        } else if (discount_type === "Percentage") {
+          netAmount = standardCost - (standardCost * discount_value / 100);
+        }
+
+        if (netAmount < 0) netAmount = 0; // safety check
+
+        // Step 5: Insert into patient_services
+        const insertQuery = `
+          INSERT INTO patient_services 
+          (patientId, serviceId, amount, discount_type, discount_value, net_amount, extra_notes)
+          VALUES (?, ?, ?, ?, ?, ?, ?)
+        `;
+
+        pool.query(
+          insertQuery,
+          [
+            patientId,
+            serviceId,
+            standardCost,
+            discount_type || null,
+            discount_value || 0,
+            netAmount,
+            extra_notes || null,
+          ],
+          (err2, result) => {
+            if (err2) {
+              return res.status(500).json({ success: false, message: "Database insert error", error: err2.message });
+            }
+
+            res.status(201).json({
+              success: true,
+              message: "Patient service created successfully",
+              data: {
+                id: result.insertId,
+                patientId,
+                serviceId,
+                standardCost,
+                discount_type,
+                discount_value,
+                netAmount,
+                extra_notes,
+              }
+            });
+          }
+        );
+      });
+    });
   } catch (error) {
     return res.status(500).json({
       success: false,
@@ -1414,33 +1479,67 @@ const GetPatientServices = async (req, res) => {
   try {
     const patientId = req.params.id;
     const sql = `
-    SELECT 
-      ps.id,
-      ps.patientId,
-      ps.doctor_id,
-      ps.serviceId,
-      ps.amount,
-      ps.insurance,
-      ps.vat,
-      ps.createdAt,
-      ps.updatedAt,
-      s.serviceCode ,
-      s.serviceName, s.durationMinutes, s.standardCost, s.secondaryCost, s.insuranceCost, s.category
-    FROM patient_services ps
-    INNER JOIN services as s on s.id=ps.serviceId
-    WHERE ps.patientId = ?
-  `;
+      SELECT 
+        ps.id,
+        ps.patientId,
+        ps.serviceId,
+        ps.amount,
+        ps.extra_notes,
+        ps.discount_type,
+        ps.discount_value,
+        ps.net_amount, 
+        ps.status,
+        ps.createdAt,
+        ps.updatedAt,
+        s.serviceCode,
+        s.serviceName,
+        s.description,
+        s.standardCost
+      FROM patient_services ps
+      INNER JOIN services AS s ON s.id = ps.serviceId
+      WHERE ps.patientId = ?
+    `;
 
     pool.query(sql, [patientId], (err, results) => {
       if (err) {
-          return res.status(500).json({ success : false, message : "Database error" , error : err.message });
+        return res.status(500).json({
+          success: false,
+          message: "Database error",
+          error: err.message
+        });
       }
 
       if (results.length === 0) {
-        return res.status(404).json({ message: "Service not found" });
+        return res.status(404).json({
+          success: false,
+          message: "No services found for this patient"
+        });
       }
 
-      return res.status(200).json({ success : true , message : "All patient services fetched successfully",data: results });
+      // Calculate totals
+      let planTotal = 0;
+      let completedTotal = 0;
+
+      results.forEach(service => {
+        if (service.status === "Plan") {
+          planTotal += service.net_amount || 0;
+        } else if (service.status === "Complete") {
+          completedTotal += service.net_amount || 0;
+        }
+      });
+
+      const totalSum = planTotal + completedTotal;
+
+      return res.status(200).json({
+        success: true,
+        message: "All patient services fetched successfully",
+        data: {
+          planTotal,
+          completedTotal,
+          totalSum,
+          results
+        }
+      });
     });
   } catch (error) {
     return res.status(500).json({
@@ -3736,7 +3835,7 @@ const getRxById = async (req, res) => {
     const query = `
       SELECT 
         id AS rxId,
-        medicine_name AS medicineName,
+        medicine_name ,
         strength,
         unit,
         pharmaceutical_form AS form,
@@ -3745,7 +3844,7 @@ const getRxById = async (req, res) => {
         notes,
         route,
         product_type AS productType,
-        active_substances AS activeSubstances
+        active_substances AS substance
       FROM rx_list
       WHERE id = ?
     `;
@@ -4393,43 +4492,69 @@ const addServices = async (req, res) => {
       secondaryCost,
       insuranceCost,
     } = req.body;
-    
-    if (!serviceName || !category || !durationMinutes) {
+
+    if (!serviceName || !category || !durationMinutes || !standardCost) {
       return res.status(400).json({
         success: false,
         message:
-          "Missing required fields: serviceName, category or durationMinutes.",
+          "Missing required fields: serviceName, category, standardCost, or durationMinutes.",
       });
     }
 
-    const insertQurery = `Insert into services  (
-                              serviceCode,serviceName,description,category,durationMinutes,standardCost,secondaryCost,insuranceCost
-                          ) values  (?,?,?,?,?,?,?,?)`;
+    // Step 1: Check for duplicates
+    const checkQuery = `SELECT id FROM services WHERE serviceName = ? LIMIT 1`;
 
-    const serviceId = `SERVICE${generateRandomNumber(5)}`;
-
-    const insertValue = [
-      serviceId,
-      serviceName,
-      description,
-      category,
-      durationMinutes,
-      standardCost,
-      secondaryCost,
-      insuranceCost,
-    ];
-
-    await pool.query(insertQurery, insertValue, (err, result) => {
+    pool.query(checkQuery, [serviceName], (err, existing) => {
       if (err) {
         return res.status(500).json({
           success: false,
-          message: "Database insert error",
+          message: "Database error while checking duplicates",
           error: err.message,
         });
       }
-      return res.status(201).json({
-        success: true,
-        message: "Service inserted successfully",
+
+      if (existing.length > 0) {
+        return res.status(409).json({
+          success: false,
+          message: "Service with this name already exists",
+        });
+      }
+
+      // Step 2: Insert if no duplicate
+      const insertQuery = `
+        INSERT INTO services (
+          serviceCode, serviceName, description, category, durationMinutes, standardCost, secondaryCost, insuranceCost
+        ) VALUES (?, ?, ?, ?, ?, ?, ?, ?)
+      `;
+
+      const serviceId = `SERVICE${generateRandomNumber(5)}`;
+
+      const insertValue = [
+        serviceId,
+        serviceName,
+        description,
+        category,
+        durationMinutes,
+        standardCost,
+        secondaryCost,
+        insuranceCost,
+      ];
+
+      pool.query(insertQuery, insertValue, (err2, result) => {
+        if (err2) {
+          return res.status(500).json({
+            success: false,
+            message: "Database insert error",
+            error: err2.message,
+          });
+        }
+
+        return res.status(201).json({
+          success: true,
+          message: "Service inserted successfully",
+          id: result.insertId,
+          serviceCode: serviceId,
+        });
       });
     });
   } catch (error) {
@@ -6615,7 +6740,7 @@ const addPatientMedicals = async (req, res) => {
     const patient_id = req.params.patient_id;
     const today = new Date().toISOString().split("T")[0];
 
-    // ✅ Check if vitals exist for patient today
+    //  Check if vitals exist for patient today
     pool.query(
       `SELECT id FROM patient_vitals 
        WHERE patient_id = ? AND DATE(recorded_at) = ? 
@@ -6630,7 +6755,7 @@ const addPatientMedicals = async (req, res) => {
           });
         }
 
-        // ❌ If no vitals found for today, stop here
+        //  If no vitals found for today, stop here
         if (vitals.length === 0) {
           return res.status(400).json({
             success: false,
@@ -6640,7 +6765,7 @@ const addPatientMedicals = async (req, res) => {
 
         const patient_vital_id = vitals[0].id;
 
-        // ✅ Check if medicals already exist for today
+        //  Check if medicals already exist for today
         pool.query(
           `SELECT id FROM patient_all_medicals 
            WHERE patient_id = ? AND DATE(created_at) = ? LIMIT 1`,
@@ -6655,7 +6780,7 @@ const addPatientMedicals = async (req, res) => {
             }
 
             try {
-              // ✅ Save text into suggestion tables
+              //  Save text into suggestion tables
               await saveSuggestion("chief_complaints", chief_complaint);
               await saveSuggestion("history_of_present_illness", history_of_present_illness);
               await saveSuggestion("history_of_past_illness", history_of_past_illness);
@@ -6667,7 +6792,7 @@ const addPatientMedicals = async (req, res) => {
               await saveSuggestion("extra_notes", extra_notes);
 
               if (existing.length > 0) {
-                // 🔹 Update existing medical record (created by vitals earlier)
+                // Update existing medical record (created by vitals earlier)
                 const medicalId = existing[0].id;
 
                 const updateQuery = `
@@ -6715,7 +6840,7 @@ const addPatientMedicals = async (req, res) => {
                   });
                 });
               } else {
-                // 🔹 Insert new record (if for some reason vitals didn’t already create it)
+                //  Insert new record (if for some reason vitals didn’t already create it)
                 const insertQuery = `
                   INSERT INTO patient_all_medicals (
                     patient_id,
@@ -6856,11 +6981,11 @@ const getMedicalDataWithVitals = (req, res) => {
       nurse
     };
 
-    // ✅ patient_id based queries (all medicals)
+    //  patient_id based queries (all medicals)
     const diagnosisQuery = `SELECT * FROM diagnosis WHERE patient_id = ?`;
     const prescriptionQuery = `
       SELECT pg.id AS group_id, pg.doctor_id, pg.created_at AS group_created_at,
-             p.id AS prescription_id, p.medicine_name, p.dose, p.frequency, p.duration, p.notes
+             p.id AS prescription_id, p.medicine_name, p.dose, p.frequency, p.duration, p.notes,p.substance,p.route,p.duration,p.strength
       FROM prescription_groups pg
       LEFT JOIN prescriptions p ON pg.id = p.prescription_group_id
       WHERE pg.patient_id = ?
@@ -6876,7 +7001,7 @@ const getMedicalDataWithVitals = (req, res) => {
       pool.query(prescriptionQuery, [patient_id], (err2, prescriptionRows) => {
         if (err2) return res.status(500).json({ success: false, message: "Error fetching prescriptions", error: err2.message });
 
-        // ✅ Group prescriptions by group_id (doctor wise + time wise)
+        //  Group prescriptions by group_id (doctor wise + time wise)
         const prescriptions = [];
         const groupMap = {};
 
@@ -6898,7 +7023,11 @@ const getMedicalDataWithVitals = (req, res) => {
               dose: row.dose,
               frequency: row.frequency,
               duration: row.duration,
-              notes: row.notes
+              notes: row.notes,
+              strength : row.strength,
+              route:row.route,
+              substance:row.substance,
+              duration : row.duration
             });
           }
         });
@@ -6919,7 +7048,7 @@ const getMedicalDataWithVitals = (req, res) => {
                   ...medicalData,
                   vitals,
                   diagnosis,
-                  prescriptions,   // ✅ now grouped by doctor + time
+                  prescriptions,   //  now grouped by doctor + time
                   allergies,
                   chronic_illnesses: chronicIllnesses,
                   xRay_and_radiology: xRay
@@ -7864,12 +7993,14 @@ const addDiagnosis = (req, res)=> {
 // };
 
 const addPrescription = (req, res) => {
-  const { medical_id, doctor_id, prescriptions } = req.body;
-
-  if (!medical_id || !doctor_id || !Array.isArray(prescriptions) || prescriptions.length === 0) {
+  const { medical_id, 
+    // doctor_id, 
+    prescriptions } = req.body;
+  console.log(req.body)
+  if (!medical_id  || !Array.isArray(prescriptions) || prescriptions.length === 0) {
     return res.status(400).json({
       success: false,
-      message: "medical_id, doctor_id and prescriptions array are required.",
+      message: "medical_id and prescriptions array are required.",
     });
   }
 
@@ -7897,11 +8028,11 @@ const addPrescription = (req, res) => {
 
       // Step 2: Insert into prescription_groups
       const groupQuery = `
-        INSERT INTO prescription_groups (patient_id, doctor_id, medical_id)
-        VALUES (?, ?, ?)
+        INSERT INTO prescription_groups (patient_id, medical_id)
+        VALUES (?, ?)
       `;
 
-      pool.query(groupQuery, [patient_id, doctor_id, medical_id], function (groupErr, groupResult) {
+      pool.query(groupQuery, [patient_id, medical_id], function (groupErr, groupResult) {
         if (groupErr) {
           return res.status(500).json({
             success: false,
@@ -7960,6 +8091,61 @@ const addPrescription = (req, res) => {
   }
 };
 
+const getPrescriptionById = async (req, res) => {
+  try {
+    const prescriptionId = req.params.prescriptionId;
+
+    const sql = `
+      SELECT 
+        id,
+        prescription_group_id,
+        medical_id,
+        patient_id,
+        medicine_name,
+        strength,
+        frequency,
+        dose,
+        duration,
+        route,
+        substance,
+        notes,
+        created_at
+      FROM prescriptions
+      WHERE prescription_group_id = ?
+    `;
+
+    pool.query(sql, [prescriptionId], (err, results) => {
+      console.log(results);
+      
+      if (err) {
+        return res.status(500).json({
+          success: false,
+          message: "Database error",
+          error: err.message
+        });
+      }
+
+      if (results.length === 0) {
+        return res.status(404).json({
+          success: false,
+          message: "Prescription not found"
+        });
+      }
+
+      return res.status(200).json({
+        success: true,
+        message: "Prescription fetched successfully",
+        data: results
+      });
+    });
+  } catch (error) {
+    return res.status(500).json({
+      success: false,
+      message: "Server error",
+      error: error.message
+    });
+  }
+};
 
 const addChronicIllness = async (req, res) => {
   const { medical_id, illness_text } = req.body;
@@ -8516,6 +8702,7 @@ export default {
   addXrayReport,
   addDiagnosis,
   addPrescription,
+  getPrescriptionById,
   addChronicIllness,
   addPatientAllergy,
 

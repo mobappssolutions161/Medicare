@@ -153,6 +153,7 @@ router.delete('/deleteAllTablesText/:id', adminController.deleteAllTablesText);
 router.post('/addXrayReport',upload.single("attachment") , adminController.addXrayReport);
 router.post('/addDiagnosis', adminController.addDiagnosis);
 router.post('/addPrescription', adminController.addPrescription);
+router.get('/getPrescriptionById/:prescriptionId', adminController.getPrescriptionById);
 router.post('/addChronicIllness', adminController.addChronicIllness);
 router.post('/addPatientAllergy', adminController.addPatientAllergy);
 
