@@ -140,6 +140,7 @@ router.get('/getMedicalDataWithVitals/:patient_id', adminController.getMedicalDa
 router.get('/getAllMedicalDataByPatient/:patient_id', adminController.getAllMedicalDataByPatient);
 router.post('/getMedicalRecordsByDate/:patient_id', adminController.getMedicalRecordsByDate);
 router.get('/getAllMedicalData', adminController.getAllMedicalData);
+router.post('/updateSingleMedicalField', adminController.updateSingleMedicalField);
 router.post('/searchMedicalField', adminController.searchMedicalField);
 router.get('/searchICD10', adminController.searchICD10);
 
@@ -151,11 +152,23 @@ router.delete('/deleteAllTablesText/:id', adminController.deleteAllTablesText);
 
 
 router.post('/addXrayReport',upload.single("attachment") , adminController.addXrayReport);
+router.put('/updateXrayReport',upload.single("attachment") , adminController.updateXrayReport);
 router.post('/addDiagnosis', adminController.addDiagnosis);
+router.put('/updateDiagnosis', adminController.updateDiagnosis);
 router.post('/addPrescription', adminController.addPrescription);
+router.put('/updatePrescription/:id', adminController.updatePrescription);
 router.get('/getPrescriptionById/:prescriptionId', adminController.getPrescriptionById);
 router.post('/addChronicIllness', adminController.addChronicIllness);
+router.put('/updateChronicIllness', adminController.updateChronicIllness);
 router.post('/addPatientAllergy', adminController.addPatientAllergy);
+router.put('/updatePatientAllergy', adminController.updatePatientAllergy);
+
+// 🗑 Delete APIs
+router.delete("/deleteXrayReport/:id",  adminController.deleteXrayReport);
+router.delete("/deleteDiagnosis/:id",  adminController.deleteDiagnosis);
+router.delete("/deletePrescription/:id",  adminController.deletePrescription);
+router.delete("/deleteChronicIllness/:id",  adminController.deleteChronicIllness);
+router.delete("/deletePatientAllergy/:id",  adminController.deletePatientAllergy);
 
 // Insurance Section
 router.post('/addInsurance', adminController.addInsurance);

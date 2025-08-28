@@ -7084,77 +7084,134 @@ const getAllMedicalDataByPatient = (req, res) => {
     ORDER BY pam.created_at DESC
   `;
 
-  pool.query(medicalQuery, [patient_id], async (err, records) => {
+  pool.query(medicalQuery, [patient_id], (err, records) => {
     if (err) {
-      return res.status(500).json({ success: false, message: "Error fetching medical records", error: err.message });
+      return res.status(500).json({
+        success: false,
+        message: "Error fetching medical records",
+        error: err.message,
+      });
     }
 
     if (records.length === 0) {
-      return res.status(404).json({ success: false, message: "No medical records found" });
-    }
-
-    try {
-      // ✅ fetch these once using patient_id (not medical_id)
-      const [diagnosis, prescriptions, allergies, chronicIllnesses, xRay] = await Promise.all([
-        new Promise((resolve, reject) => pool.query(`SELECT * FROM diagnosis WHERE patient_id = ?`, [patient_id], (e, r) => e ? reject(e) : resolve(r))),
-        new Promise((resolve, reject) => pool.query(`SELECT * FROM prescriptions WHERE patient_id = ?`, [patient_id], (e, r) => e ? reject(e) : resolve(r))),
-        new Promise((resolve, reject) => pool.query(`SELECT * FROM patient_allergies WHERE patient_id = ?`, [patient_id], (e, r) => e ? reject(e) : resolve(r))),
-        new Promise((resolve, reject) => pool.query(`SELECT * FROM chronic_illness WHERE patient_id = ?`, [patient_id], (e, r) => e ? reject(e) : resolve(r))),
-        new Promise((resolve, reject) => pool.query(`SELECT * FROM xray_and_radiology WHERE patient_id = ?`, [patient_id], (e, r) => e ? reject(e) : resolve(r))),
-      ]);
-
-      // ✅ attach same data to every medical record
-      const enrichedRecords = records.map((row) => {
-        const {
-          vitals_id, gender, age, doctor_id, recorded_at, blood_pressure,
-          respiratory_rate, pulse, spo2, rbs_mg, rbs_nmol, bp_position,
-          temperature, weight, height, bmi, risk_of_fall, urgency, notes, nurse,
-          ...medicalData
-        } = row;
-
-        const vitals = {
-          id: vitals_id,
-          gender,
-          age,
-          doctor_id,
-          recorded_at,
-          blood_pressure,
-          respiratory_rate,
-          pulse,
-          spo2,
-          rbs_mg,
-          rbs_nmol,
-          bp_position,
-          temperature,
-          weight,
-          height,
-          bmi,
-          risk_of_fall,
-          urgency,
-          notes,
-          nurse
-        };
-
-        return {
-          ...medicalData,
-          vitals,
-          diagnosis,
-          prescriptions,
-          allergies,
-          chronic_illnesses: chronicIllnesses,
-          xRay_and_radiology: xRay
-        };
+      return res.status(404).json({
+        success: false,
+        message: "No medical records found",
       });
-
-      res.status(200).json({
-        success: true,
-        message: `All medical records fetched successfully for patient ${patient_id}`,
-        data: enrichedRecords
-      });
-
-    } catch (error) {
-      res.status(500).json({ success: false, message: "Error enriching medical records", error: error.message });
     }
+    //  Fetch related tables one by one
+    pool.query(`SELECT * FROM diagnosis WHERE patient_id = ?`, [patient_id], (err, diagnosis) => {
+      if (err) return res.status(500).json({ success: false, message: "Error fetching diagnosis", error: err.message });
+
+      pool.query(
+        `
+        SELECT 
+          pg.id AS group_id, 
+          pg.doctor_id, 
+          pg.created_at AS group_created_at,
+          p.id AS prescription_id, 
+          p.medicine_name, p.dose, p.frequency, p.duration, 
+          p.notes, p.substance, p.route, p.strength
+        FROM prescription_groups pg
+        LEFT JOIN prescriptions p ON pg.id = p.prescription_group_id
+        WHERE pg.patient_id = ?
+        ORDER BY pg.created_at DESC
+        `,
+        [patient_id],
+        (err, prescriptionsRaw) => {
+          if (err) return res.status(500).json({ success: false, message: "Error fetching prescriptions", error: err.message });
+          console.log(prescriptionsRaw);
+          
+          //  Group prescriptions correctly by group_id
+          const prescriptions = prescriptionsRaw.reduce((acc, row) => {
+            const groupId = row.group_id; //  FIXED
+            if (!acc[groupId]) {
+              acc[groupId] = {
+                group_id: row.group_id,
+                doctor_id: row.doctor_id,
+                prescribed_at: row.group_created_at,
+                medicines: []
+              };
+            }
+            if (row.prescription_id) {
+              acc[groupId].medicines.push({
+                id: row.prescription_id,
+                medicine_name: row.medicine_name,
+                dose: row.dose,
+                frequency: row.frequency,
+                duration: row.duration,
+                notes: row.notes,
+                strength: row.strength,
+                route: row.route,
+                substance: row.substance
+              });
+            }
+            return acc;
+          }, {});
+
+          pool.query(`SELECT * FROM patient_allergies WHERE patient_id = ?`, [patient_id], (err, allergies) => {
+            if (err) return res.status(500).json({ success: false, message: "Error fetching allergies", error: err.message });
+
+            pool.query(`SELECT * FROM chronic_illness WHERE patient_id = ?`, [patient_id], (err, chronicIllnesses) => {
+              if (err) return res.status(500).json({ success: false, message: "Error fetching chronic illnesses", error: err.message });
+
+              pool.query(`SELECT * FROM xray_and_radiology WHERE patient_id = ?`, [patient_id], (err, xRay) => {
+                if (err) return res.status(500).json({ success: false, message: "Error fetching xRay", error: err.message });
+
+                //  Attach to each medical record
+                const enrichedRecords = records.map((row) => {
+                  const {
+                    vitals_id, gender, age, doctor_id, recorded_at, blood_pressure,
+                    respiratory_rate, pulse, spo2, rbs_mg, rbs_nmol, bp_position,
+                    temperature, weight, height, bmi, risk_of_fall, urgency, notes, nurse,
+                    ...medicalData
+                  } = row;
+
+                  const vitals = {
+                    id: vitals_id,
+                    gender,
+                    age,
+                    doctor_id,
+                    recorded_at,
+                    blood_pressure,
+                    respiratory_rate,
+                    pulse,
+                    spo2,
+                    rbs_mg,
+                    rbs_nmol,
+                    bp_position,
+                    temperature,
+                    weight,
+                    height,
+                    bmi,
+                    risk_of_fall,
+                    urgency,
+                    notes,
+                    nurse
+                  };
+
+                  return {
+                    ...medicalData,
+                    vitals,
+                    diagnosis,
+                    prescriptions: Object.values(prescriptions), // grouped by group_id + doctor + date
+                    allergies,
+                    chronic_illnesses: chronicIllnesses,
+                    xRay_and_radiology: xRay
+                  };
+                });
+
+                res.status(200).json({
+                  success: true,
+                  message: `All medical records fetched successfully for patient ${patient_id}`,
+                  data: enrichedRecords
+                });
+              });
+            });
+          });
+        }
+      );
+    });
   });
 };
 
@@ -7182,7 +7239,7 @@ const getMedicalRecordsByDate = (req, res) => {
     ORDER BY pam.created_at DESC
   `;
 
-  pool.query(medicalQuery, [patient_id, date], async (err, records) => {
+  pool.query(medicalQuery, [patient_id, date], (err, records) => {
     if (err) {
       return res.status(500).json({ success: false, message: "Error fetching medical records", error: err.message });
     }
@@ -7191,69 +7248,118 @@ const getMedicalRecordsByDate = (req, res) => {
       return res.status(404).json({ success: false, message: "No medical records found" });
     }
 
-    try {
-      const row = records[0]; // sirf pehla record lenge (date wise)
+    // ✅ fetch prescriptions (group by group_id + doctor + date)
+    const prescriptionQuery = `
+      SELECT pg.id AS group_id, pg.doctor_id, pg.created_at AS group_created_at,
+             p.id AS prescription_id, p.medicine_name, p.dose, p.frequency, 
+             p.duration, p.notes, p.substance, p.route, p.strength
+      FROM prescription_groups pg
+      LEFT JOIN prescriptions p ON pg.id = p.prescription_group_id
+      WHERE pg.patient_id = ? 
+      ORDER BY pg.created_at DESC
+    `;
 
-      const {
-        vitals_id, gender, age, doctor_id, recorded_at, blood_pressure,
-        respiratory_rate, pulse, spo2, rbs_mg, rbs_nmol, bp_position,
-        temperature, weight, height, bmi, risk_of_fall, urgency, notes, nurse,
-        ...medicalData
-      } = row;
+    pool.query(prescriptionQuery, [patient_id, date], (presErr, prescriptionRows) => {
+      if (presErr) {
+        return res.status(500).json({ success: false, message: "Error fetching prescriptions", error: presErr.message });
+      }
 
-      const vitals = {
-        id: vitals_id,
-        gender,
-        age,
-        doctor_id,
-        recorded_at,
-        blood_pressure,
-        respiratory_rate,
-        pulse,
-        spo2,
-        rbs_mg,
-        rbs_nmol,
-        bp_position,
-        temperature,
-        weight,
-        height,
-        bmi,
-        risk_of_fall,
-        urgency,
-        notes,
-        nurse
-      };
+      const prescriptions = prescriptionRows.reduce((acc, row) => {
+        if (!acc[row.group_id]) {
+          acc[row.group_id] = {
+            group_id: row.group_id,
+            doctor_id: row.doctor_id,
+            prescribed_at: row.group_created_at,
+            medicines: []
+          };
+        }
+        if (row.prescription_id) {
+          acc[row.group_id].medicines.push({
+            id: row.prescription_id,
+            medicine_name: row.medicine_name,
+            dose: row.dose,
+            frequency: row.frequency,
+            duration: row.duration,
+            notes: row.notes,
+            strength: row.strength,
+            route: row.route,
+            substance: row.substance
+          });
+        }
+        return acc;
+      }, {});
 
-      // ✅ ek hi patient_id ke behalf par parallel queries
-      const [diagnosis, prescriptions, allergies, chronicIllnesses, xRay] = await Promise.all([
-        new Promise((resolve, reject) => pool.query(`SELECT * FROM diagnosis WHERE patient_id = ?`, [patient_id], (e, r) => e ? reject(e) : resolve(r))),
-        new Promise((resolve, reject) => pool.query(`SELECT * FROM prescriptions WHERE patient_id = ?`, [patient_id], (e, r) => e ? reject(e) : resolve(r))),
-        new Promise((resolve, reject) => pool.query(`SELECT * FROM patient_allergies WHERE patient_id = ?`, [patient_id], (e, r) => e ? reject(e) : resolve(r))),
-        new Promise((resolve, reject) => pool.query(`SELECT * FROM chronic_illness WHERE patient_id = ?`, [patient_id], (e, r) => e ? reject(e) : resolve(r))),
-        new Promise((resolve, reject) => pool.query(`SELECT * FROM xray_and_radiology WHERE patient_id = ?`, [patient_id], (e, r) => e ? reject(e) : resolve(r))),
-      ]);
+      const prescriptionsArray = Object.values(prescriptions);
 
-      const finalRecord = {
-        ...medicalData,
-        vitals,
-        diagnosis,
-        prescriptions,
-        allergies,
-        chronic_illnesses: chronicIllnesses,
-        xRay_and_radiology: xRay
-      };
+      // ✅ fetch other related tables
+      pool.query(`SELECT * FROM diagnosis WHERE patient_id = ?`, [patient_id], (diagErr, diagnosis) => {
+        if (diagErr) return res.status(500).json({ success: false, message: "Error fetching diagnosis", error: diagErr.message });
 
-      res.status(200).json({
-        success: true,
-        message: `Medical record for patient ${patient_id} on ${date} fetched successfully`,
-        data: finalRecord
+        pool.query(`SELECT * FROM patient_allergies WHERE patient_id = ?`, [patient_id], (allErr, allergies) => {
+          if (allErr) return res.status(500).json({ success: false, message: "Error fetching allergies", error: allErr.message });
+
+          pool.query(`SELECT * FROM chronic_illness WHERE patient_id = ?`, [patient_id], (chronicErr, chronicIllnesses) => {
+            if (chronicErr) return res.status(500).json({ success: false, message: "Error fetching chronic illnesses", error: chronicErr.message });
+
+            pool.query(`SELECT * FROM xray_and_radiology WHERE patient_id = ?`, [patient_id], (xrayErr, xRay) => {
+              if (xrayErr) return res.status(500).json({ success: false, message: "Error fetching x-ray data", error: xrayErr.message });
+
+              // ✅ attach everything in same style as getAllMedicalDataByPatient
+              const enrichedRecords = records.map((row) => {
+                const {
+                  vitals_id, gender, age, doctor_id, recorded_at, blood_pressure,
+                  respiratory_rate, pulse, spo2, rbs_mg, rbs_nmol, bp_position,
+                  temperature, weight, height, bmi, risk_of_fall, urgency, notes, nurse,
+                  ...medicalData
+                } = row;
+
+                const vitals = {
+                  id: vitals_id,
+                  gender,
+                  age,
+                  doctor_id,
+                  recorded_at,
+                  blood_pressure,
+                  respiratory_rate,
+                  pulse,
+                  spo2,
+                  rbs_mg,
+                  rbs_nmol,
+                  bp_position,
+                  temperature,
+                  weight,
+                  height,
+                  bmi,
+                  risk_of_fall,
+                  urgency,
+                  notes,
+                  nurse
+                };
+
+                return {
+                  ...medicalData,
+                  vitals,
+                  diagnosis,
+                  prescriptions: prescriptionsArray,
+                  allergies,
+                  chronic_illnesses: chronicIllnesses,
+                  xRay_and_radiology: xRay
+                };
+              });
+
+              res.status(200).json({
+                success: true,
+                message: `Medical records for patient ${patient_id} on ${date} fetched successfully`,
+                data: enrichedRecords
+              });
+            });
+          });
+        });
       });
-
-    } catch (error) {
-      res.status(500).json({ success: false, message: "Error enriching medical records", error: error.message });
-    }
+    });
   });
 };
+
 
 const getAllMedicalData = (req, res) => {
   const medicalQuery = `
@@ -7364,6 +7470,63 @@ const getAllMedicalData = (req, res) => {
       res.status(500).json({ success: false, message: "Error enriching medical records", error: error.message });
     }
   });
+};
+
+const updateSingleMedicalField = async (req, res) => {
+  try {
+    const { id, field, value } = req.body;
+
+    if (!id || !field || value === undefined) {
+      return res.status(400).json({
+        success: false,
+        message: "id, field and value are required",
+      });
+    }
+
+    // Allowed fields (no prescription)
+    const allowedFields = [
+      "chief_complaint",
+      "history_of_present_illness",
+      "history_of_past_illness",
+      "examination_general",
+      "examination_systemic",
+      "examination_local",
+      "treatment_plan",
+      "advises",
+      "extra_notes",
+      "pain_assessment"
+    ];
+
+    if (!allowedFields.includes(field)) {
+      return res.status(400).json({
+        success: false,
+        message: "Invalid field name or not allowed to update",
+      });
+    }
+
+    const sql = `UPDATE patient_all_medicals SET ${field} = ? WHERE id = ?`;
+
+    pool.query(sql, [value, id], (err, result) => {
+      if (err) {
+        return res.status(500).json({ success: false, error: err.message });
+      }
+
+      if (result.affectedRows === 0) {
+        // id not found
+        return res.status(404).json({
+          success: false,
+          message: `No record found with id ${id}`,
+        });
+      }
+
+      res.json({
+        success: true,
+        message: `${field} updated successfully`,
+      });
+    });
+  } catch (error) {
+    res.status(500).json({ success: false, error: error.message });
+  }
 };
 
 const searchMedicalField = async (req, res) => {
@@ -7853,6 +8016,75 @@ const addXrayReport = (req, res) => {
   }
 }
 
+const updateXrayReport = (req, res) => {
+  const { id, title, description } = req.body;
+  const attachment = req.file ? req.file.filename : null;
+
+  if (!id) {
+    return res.status(400).json({
+      success: false,
+      message: "Report id is required",
+    });
+  }
+
+  try {
+    // 🔍 Step 1: Fetch existing record
+    const selectQuery = `SELECT * FROM xray_and_radiology WHERE id = ?`;
+    pool.query(selectQuery, [id], (err, result) => {
+      if (err) {
+        return res.status(500).json({
+          success: false,
+          message: "Database error while fetching old report",
+          error: err.message,
+        });
+      }
+
+      if (result.length === 0) {
+        return res.status(404).json({
+          success: false,
+          message: "No report found with this ID",
+        });
+      }
+
+      const oldData = result[0];
+
+      // 🔄 Step 2: Keep old value if new one not provided
+      const finalTitle = title || oldData.title;
+      const finalDescription = description || oldData.description;
+      const finalAttachment = attachment || oldData.attachment;
+
+      // 💾 Step 3: Update record
+      const updateQuery = `
+        UPDATE xray_and_radiology 
+        SET title = ?, description = ?, attachment = ?
+        WHERE id = ?
+      `;
+      const values = [finalTitle, finalDescription, finalAttachment, id];
+
+      pool.query(updateQuery, values, (updateErr, updateResult) => {
+        if (updateErr) {
+          return res.status(500).json({
+            success: false,
+            message: "Database error while updating report",
+            error: updateErr.message,
+          });
+        }
+
+        return res.json({
+          success: true,
+          message: "Report updated successfully",
+        });
+      });
+    });
+  } catch (error) {
+    return res.status(500).json({
+      success: false,
+      message: "Internal server error",
+      error: error.message,
+    });
+  }
+};
+
 const addDiagnosis = (req, res)=> {
   const {
     code,
@@ -7918,6 +8150,65 @@ const addDiagnosis = (req, res)=> {
     });
   }
 }
+
+const updateDiagnosis = async (req, res) => {
+  try {
+    const { id, diagnosis_text, code } = req.body;
+
+    if (!id) {
+      return res.status(400).json({
+        success: false,
+        message: "Diagnosis ID is required",
+      });
+    }
+
+    // Step 1: Fetch existing record
+    const getQuery = `SELECT * FROM diagnosis WHERE id = ?`;
+    pool.query(getQuery, [id], (err, results) => {
+      if (err) {
+        console.error("Error fetching diagnosis:", err);
+        return res.status(500).json({ success: false, message: "Database error" });
+      }
+
+      if (results.length === 0) {
+        return res.status(404).json({ success: false, message: "Diagnosis not found" });
+      }
+
+      const existing = results[0];
+
+      // Step 2: Prepare updated values (if new value comes → update, else keep old one)
+      const updatedDiagnosisText = diagnosis_text || existing.diagnosis_text;
+      const updatedCode = code || existing.code;
+
+      // Step 3: Update record
+      const updateQuery = `
+        UPDATE diagnosis 
+        SET diagnosis_text = ?, code = ?
+        WHERE id = ?
+      `;
+
+      pool.query(updateQuery, [updatedDiagnosisText, updatedCode, id], (err, updateResult) => {
+        if (err) {
+          console.error("Error updating diagnosis:", err);
+          return res.status(500).json({ success: false, message: "Database update error" });
+        }
+
+        return res.status(200).json({
+          success: true,
+          message: "Diagnosis updated successfully",
+          data: {
+            id,
+            diagnosis_text: updatedDiagnosisText,
+            code: updatedCode,
+          },
+        });
+      });
+    });
+  } catch (error) {
+    console.error("Error in updateDiagnosis:", error);
+    return res.status(500).json({ success: false, message: "Internal Server Error" });
+  }
+};
 
 // const addPrescription = (req, res) => {
 //   const { medical_id, prescriptions } = req.body;
@@ -8091,6 +8382,68 @@ const addPrescription = (req, res) => {
   }
 };
 
+const updatePrescription = (req, res) => {
+  const { id } = req.params; // prescription id
+  const {
+    medicine_name,
+    strength,
+    frequency,
+    dose,
+    duration,
+    route,
+    substance,
+    notes
+  } = req.body;
+
+  // ✅ First get existing record
+  const selectQuery = "SELECT * FROM prescriptions WHERE id = ?";
+  pool.query(selectQuery, [id], (err, results) => {
+    if (err) {
+      return res.status(500).json({ success: false, message: "DB error", error: err });
+    }
+    if (results.length === 0) {
+      return res.status(404).json({ success: false, message: "Prescription not found" });
+    }
+
+    const existing = results[0];
+
+    // ✅ Take new if provided, else keep old
+    const updatedData = {
+      medicine_name: medicine_name || existing.medicine_name,
+      strength: strength || existing.strength,
+      frequency: frequency || existing.frequency,
+      dose: dose || existing.dose,
+      duration: duration || existing.duration,
+      route: route || existing.route,
+      substance: substance || existing.substance,
+      notes: notes || existing.notes
+    };
+
+    const updateQuery = `
+      UPDATE prescriptions 
+      SET medicine_name=?, strength=?, frequency=?, dose=?, duration=?, route=?, substance=?, notes=?, updated_at=NOW()
+      WHERE id=?`;
+
+    pool.query(updateQuery, [
+      updatedData.medicine_name,
+      updatedData.strength,
+      updatedData.frequency,
+      updatedData.dose,
+      updatedData.duration,
+      updatedData.route,
+      updatedData.substance,
+      updatedData.notes,
+      id
+    ], (err2, result) => {
+      if (err2) {
+        return res.status(500).json({ success: false, message: "Update failed", error: err2 });
+      }
+      res.json({ success: true, message: "Prescription updated successfully" });
+    });
+  });
+};
+
+
 const getPrescriptionById = async (req, res) => {
   try {
     const prescriptionId = req.params.prescriptionId;
@@ -8189,6 +8542,48 @@ const addChronicIllness = async (req, res) => {
   });
 };
 
+const updateChronicIllness = async (req, res) => {
+  try {
+    const { id, illness_text } = req.body;
+
+    if (!id || !illness_text) {
+      return res.status(400).json({
+        success: false,
+        message: "id and illness_text are required",
+      });
+    }
+
+    // Check if record exists
+    const checkSql = `SELECT * FROM chronic_illness WHERE id = ?`;
+    pool.query(checkSql, [id], (err, rows) => {
+      if (err) {
+        return res.status(500).json({ success: false, error: err.message });
+      }
+      if (rows.length === 0) {
+        return res.status(404).json({
+          success: false,
+          message: "Chronic illness record not found",
+        });
+      }
+
+      // Update record
+      const sql = `UPDATE chronic_illness SET illness_text = ? WHERE id = ?`;
+      pool.query(sql, [illness_text, id], (err2) => {
+        if (err2) {
+          return res.status(500).json({ success: false, error: err2.message });
+        }
+        res.json({
+          success: true,
+          message: "Chronic illness updated successfully",
+        });
+      });
+    });
+  } catch (error) {
+    res.status(500).json({ success: false, error: error.message });
+  }
+};
+
+
 const addPatientAllergy = async (req, res) => {
   const { medical_id, name, type } = req.body;
 
@@ -8248,6 +8643,160 @@ const addPatientAllergy = async (req, res) => {
     });
   }
 };
+
+const updatePatientAllergy = async (req, res) => {
+  try {
+    const { id, allergy_name, allergy_type } = req.body;
+
+    if (!id || !allergy_name || !allergy_type) {
+      return res.status(400).json({
+        success: false,
+        message: "id, allergy_name and allergy_type are required",
+      });
+    }
+
+    // Check if record exists
+    const checkSql = `SELECT * FROM patient_allergies WHERE id = ?`;
+    pool.query(checkSql, [id], (err, rows) => {
+      if (err) {
+        return res.status(500).json({ success: false, error: err.message });
+      }
+      if (rows.length === 0) {
+        return res.status(404).json({
+          success: false,
+          message: "Allergy record not found",
+        });
+      }
+
+      // Update record
+      const sql = `UPDATE patient_allergies SET allergy_name = ?, allergy_type = ? WHERE id = ?`;
+      pool.query(sql, [allergy_name, allergy_type, id], (err2) => {
+        if (err2) {
+          return res.status(500).json({ success: false, error: err2.message });
+        }
+        res.json({
+          success: true,
+          message: "Patient allergy updated successfully",
+        });
+      });
+    });
+  } catch (error) {
+    res.status(500).json({ success: false, error: error.message });
+  }
+};
+
+
+// 🗑 Delete Xray Report
+const deleteXrayReport = (req, res) => {
+  const { id } = req.params;
+
+  const sql = "DELETE FROM xray_and_radiology WHERE id = ?";
+  pool.query(sql, [id], (err, result) => {
+    if (err) {
+      return res.status(500).json({ success: false, message: "DB error", error: err });
+    }
+    if (result.affectedRows === 0) {
+      return res.status(404).json({ success: false, message: "Xray Report not found" });
+    }
+    res.status(200).json({ success: true, message: "Xray Report deleted successfully" });
+  });
+};
+
+
+// 🗑 Delete Diagnosis
+const deleteDiagnosis = (req, res) => {
+  const { id } = req.params;
+
+  const sql = "DELETE FROM diagnosis WHERE id = ?";
+  pool.query(sql, [id], (err, result) => {
+    if (err) {
+      return res.status(500).json({ success: false, message: "DB error", error: err });
+    }
+    if (result.affectedRows === 0) {
+      return res.status(404).json({ success: false, message: "Diagnosis not found" });
+    }
+    res.status(200).json({ success: true, message: "Diagnosis deleted successfully" });
+  });
+};
+
+
+// 🗑 Delete Prescription
+const deletePrescription = (req, res) => {
+  const { id } = req.params;
+
+  // pehle prescriptions delete
+  const deletePrescriptionsQuery = "DELETE FROM prescriptions WHERE prescription_group_id = ?";
+  // phir group delete
+  const deleteGroupQuery = "DELETE FROM prescription_groups WHERE id = ?";
+
+  pool.query(deletePrescriptionsQuery, [id], (err) => {
+    if (err) {
+      return res.status(500).json({
+        success: false,
+        message: "Error deleting prescriptions",
+        error: err,
+      });
+    }
+
+    pool.query(deleteGroupQuery, [id], (err, result) => {
+      if (err) {
+        return res.status(500).json({
+          success: false,
+          message: "Error deleting prescription group",
+          error: err,
+        });
+      }
+
+      if (result.affectedRows === 0) {
+        return res.status(404).json({
+          success: false,
+          message: "Prescription group not found",
+        });
+      }
+
+      res.status(200).json({
+        success: true,
+        message: "Prescription group and its prescriptions deleted successfully",
+      });
+    });
+  });
+};
+
+
+
+// 🗑 Delete Chronic Illness
+const deleteChronicIllness = (req, res) => {
+  const { id } = req.params;
+
+  const sql = "DELETE FROM chronic_illness WHERE id = ?";
+  pool.query(sql, [id], (err, result) => {
+    if (err) {
+      return res.status(500).json({ success: false, message: "DB error", error: err });
+    }
+    if (result.affectedRows === 0) {
+      return res.status(404).json({ success: false, message: "Chronic Illness not found" });
+    }
+    res.status(200).json({ success: true, message: "Chronic Illness deleted successfully" });
+  });
+};
+
+
+// 🗑 Delete Patient Allergy
+const deletePatientAllergy = (req, res) => {
+  const { id } = req.params;
+
+  const sql = "DELETE FROM patient_allergies WHERE id = ?";
+  pool.query(sql, [id], (err, result) => {
+    if (err) {
+      return res.status(500).json({ success: false, message: "DB error", error: err });
+    }
+    if (result.affectedRows === 0) {
+      return res.status(404).json({ success: false, message: "Patient Allergy not found" });
+    }
+    res.status(200).json({ success: true, message: "Patient Allergy deleted successfully" });
+  });
+};
+
 
 // INSURANCE Section
 
@@ -8689,6 +9238,7 @@ export default {
   getAllMedicalDataByPatient,
   getMedicalRecordsByDate,
   getAllMedicalData,
+  updateSingleMedicalField,
   searchMedicalField,
   searchICD10,
 
@@ -8700,11 +9250,21 @@ export default {
 
   // Medical history all table sections
   addXrayReport,
+  updateXrayReport,
   addDiagnosis,
+  updateDiagnosis,
   addPrescription,
+  updatePrescription,
   getPrescriptionById,
   addChronicIllness,
+  updateChronicIllness,
   addPatientAllergy,
+  updatePatientAllergy,
+  deleteXrayReport,
+  deleteDiagnosis,
+  deletePrescription,
+  deleteChronicIllness,
+  deletePatientAllergy, 
 
   // Insurance section
   addInsurance,
