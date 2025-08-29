@@ -36,7 +36,12 @@ router.put("/updatePatient/:patientId", upload.fields([
 router.delete("/deletePatient/:patientId", adminController.deletePatient)
 router.post("/AddPatientServices", adminController.AddPatientServices)
 router.get("/GetPatientServices/:id", adminController.GetPatientServices)
+router.put("/UpdatePatientServices/:id", adminController.UpdatePatientServices)
 router.delete("/DeletePatientService/:id", adminController.DeletePatientService)
+router.post("/addPatientPharmacy/:patientId", adminController.addPatientPharmacy)
+router.get("/getPharmacyByPatientId/:patientId", adminController.getPharmacyByPatientId)
+router.put("/updatePatientPharmacy/:id", adminController.updatePatientPharmacy)
+router.delete("/deletePatientPharmacy/:id", adminController.deletePatientPharmacy)
 
 router.post("/createAppointment", adminController.createAppointment)
 router.get("/getAllAppointments", adminController.getAllAppointments)
@@ -156,6 +161,7 @@ router.put('/updateXrayReport',upload.single("attachment") , adminController.upd
 router.post('/addDiagnosis', adminController.addDiagnosis);
 router.put('/updateDiagnosis', adminController.updateDiagnosis);
 router.post('/addPrescription', adminController.addPrescription);
+router.get('/getAllPrescriptions', adminController.getAllPrescriptions);
 router.put('/updatePrescription/:id', adminController.updatePrescription);
 router.get('/getPrescriptionById/:prescriptionId', adminController.getPrescriptionById);
 router.post('/addChronicIllness', adminController.addChronicIllness);

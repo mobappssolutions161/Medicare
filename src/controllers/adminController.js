@@ -1,3 +1,4 @@
+
 import pool from "../config/db.js";
 // import bcrypt from "bcrypt";
 
@@ -1550,6 +1551,132 @@ const GetPatientServices = async (req, res) => {
   }
 };
 
+const UpdatePatientServices = async (req, res) => {
+  try {
+    const { id } = req.params;
+    const { serviceId, discount_type, discount_value, extra_notes } = req.body;
+
+    if (!id || isNaN(id)) {
+      return res.status(400).json({ success: false, message: "Invalid or missing ID" });
+    }
+
+    if (!serviceId) {
+      return res.status(400).json({
+        success: false,
+        message: "Missing required field: serviceId",
+      });
+    }
+
+    const getExistingQuery = `SELECT * FROM patient_services WHERE id = ?`;
+    pool.query(getExistingQuery, [id], (err, existingResult) => {
+      if (err) {
+        return res.status(500).json({ success: false, message: "Database error", error: err.message });
+      }
+
+      if (existingResult.length === 0) {
+        return res.status(404).json({ success: false, message: "Patient service not found" });
+      }
+
+      const existingRecord = existingResult[0];
+      const originalPatientId = existingRecord.patientId;
+
+      // Check for duplicate if serviceId changed
+      if (serviceId != existingRecord.serviceId) {
+        const duplicateQuery = `SELECT id FROM patient_services WHERE patientId = ? AND serviceId = ? AND id != ?`;
+        pool.query(duplicateQuery, [originalPatientId, serviceId, id], (dupErr, dupResult) => {
+          if (dupErr) {
+            return res.status(500).json({ success: false, message: "Database error", error: dupErr.message });
+          }
+
+          if (dupResult.length > 0) {
+            return res.status(400).json({ success: false, message: "This service is already added for the patient" });
+          }
+
+          continueUpdate();
+        });
+      } else {
+        continueUpdate();
+      }
+
+      function continueUpdate() {
+        const serviceQuery = `SELECT standardCost FROM services WHERE id = ?`;
+        pool.query(serviceQuery, [serviceId], (serviceErr, serviceResult) => {
+          if (serviceErr) {
+            return res.status(500).json({ success: false, message: "Database error", error: serviceErr.message });
+          }
+
+          if (serviceResult.length === 0) {
+            return res.status(404).json({ success: false, message: "Service not found" });
+          }
+
+          const { standardCost } = serviceResult[0];
+          const safeDiscountValue = isNaN(discount_value) ? 0 : Number(discount_value);
+
+          let netAmount = standardCost;
+
+          if (discount_type === "Amount") {
+            netAmount = standardCost - safeDiscountValue;
+          } else if (discount_type === "Percentage") {
+            netAmount = standardCost - (standardCost * safeDiscountValue / 100);
+          }
+
+          if (netAmount < 0 || isNaN(netAmount)) netAmount = 0;
+
+          const updateQuery = `
+            UPDATE patient_services
+            SET serviceId = ?, amount = ?, discount_type = ?, discount_value = ?, net_amount = ?, extra_notes = ?
+            WHERE id = ?
+          `;
+
+          pool.query(
+            updateQuery,
+            [
+              serviceId,
+              standardCost,
+              discount_type || null,
+              safeDiscountValue,
+              netAmount,
+              extra_notes || null,
+              id,
+            ],
+            (updateErr, updateResult) => {
+              if (updateErr) {
+                return res.status(500).json({
+                  success: false,
+                  message: "Error updating patient service",
+                  error: updateErr.message
+                });
+              }
+
+              return res.status(200).json({
+                success: true,
+                message: "Patient service updated successfully",
+                data: {
+                  id,
+                  patientId: originalPatientId,
+                  serviceId,
+                  amount: standardCost,
+                  discount_type,
+                  discount_value: safeDiscountValue,
+                  netAmount,
+                  extra_notes
+                }
+              });
+            }
+          );
+        });
+      }
+    });
+  } catch (error) {
+    return res.status(500).json({
+      success: false,
+      message: "Server error",
+      error: error.message
+    });
+  }
+};
+
+
 const DeletePatientService = async (req, res) => {
   try {
     const serviceId = req.params.id; // patient_services table row ID
@@ -1586,6 +1713,377 @@ const DeletePatientService = async (req, res) => {
     });
   }
 };
+
+const addPatientPharmacy = async (req, res) => {
+  try {
+    const patientId = req.params.patientId;
+    const { drugId, quantity } = req.body;
+
+    if (!quantity) {
+      return res.status(400).json({
+        success: false,
+        message: "Enter Quantity"
+      });
+    }
+
+    if (!drugId || isNaN(drugId)) {
+      return res.status(400).json({
+        success: false,
+        message: "Invalid or missing drugId"
+      });
+    }
+
+    if (!patientId || isNaN(patientId)) {
+      return res.status(400).json({
+        success: false,
+        message: "Invalid or missing patientId"
+      });
+    }
+
+    // Check if drug already assigned to the patient
+    const checkExistingQuery = `SELECT * FROM patient_pharmacy WHERE patient_id = ? AND drugId = ?`;
+    pool.query(checkExistingQuery, [patientId, drugId], (checkErr, checkResult) => {
+      if (checkErr) {
+        return res.status(500).json({
+          success: false,
+          message: "Error while checking existing drug for patient",
+          error: checkErr.message
+        });
+      }
+
+      if (checkResult.length > 0) {
+        return res.status(400).json({
+          success: false,
+          message: "This drug is already assigned to the patient"
+        });
+      }
+
+      //  Proceed to check drug availability
+      const drugSearchQuery = `SELECT * FROM drugs WHERE id = ?`;
+
+      pool.query(drugSearchQuery, [drugId], (err, result) => {
+        if (err) {
+          return res.status(500).json({
+            success: false,
+            message: "Database search error",
+            error: err.message
+          });
+        }
+
+        let drugResult = result[0];
+
+        if (!drugResult) {
+          return res.status(404).json({
+            success: false,
+            message: "Drug not found"
+          });
+        }
+
+        if (quantity > drugResult.quantity) {
+          return res.status(400).json({
+            success: false,
+            message: "Quantity not available in stock"
+          });
+        }
+
+        let medicinePrice = quantity * drugResult.price;
+
+        const insertQuery = `INSERT INTO patient_pharmacy (patient_id, drugId, quantity, price) VALUES (?, ?, ?, ?)`;
+
+        pool.query(insertQuery, [patientId, drugId, quantity, medicinePrice], (insertError, insertionResult) => {
+          if (insertError) {
+            return res.status(500).json({
+              success: false,
+              message: "Error while inserting data",
+              error: insertError.message
+            });
+          }
+
+          drugResult.quantity -= quantity;
+
+          const updateDrugQuery = `UPDATE drugs SET quantity = ? WHERE id = ?`;
+
+          pool.query(updateDrugQuery, [drugResult.quantity, drugId], (updateError, updateResult) => {
+            if (updateError) {
+              return res.status(500).json({
+                success: false,
+                message: "Error while updating drug",
+                error: updateError.message
+              });
+            }
+
+            return res.status(201).json({
+              success: true,
+              message: "Patient pharmacy inserted successfully"
+            });
+          });
+        });
+      });
+    });
+  } catch (error) {
+    return res.status(500).json({
+      success: false,
+      message: "Internal Server Error",
+      error: error.message
+    });
+  }
+};
+
+const getPharmacyByPatientId = async (req, res) => {
+  try {
+    const patientId = req.params.patientId;
+
+    if (!patientId || isNaN(patientId)) {
+      return res.status(400).json({
+        success: false,
+        message: "Invalid or missing patientId"
+      });
+    }
+
+    const query = `
+      SELECT 
+        pp.id,
+        pp.patient_id,
+        pp.drugId,
+        pp.created_at,
+        d.name AS drug_name,
+        pp.quantity,
+        pp.price
+      FROM 
+        patient_pharmacy pp
+      JOIN 
+        drugs d ON pp.drugId = d.id
+      WHERE 
+        pp.patient_id = ?;
+    `;
+
+    pool.query(query, [patientId], (err, results) => {
+      if (err) {
+        return res.status(500).json({
+          success: false,
+          message: "Database error",
+          error: err.message
+        });
+      }
+
+      if (results.length === 0) {
+        return res.status(404).json({
+          success: false,
+          message: "No drugs found for this patient"
+        });
+      }
+
+      return res.status(200).json({
+        success: true,
+        data: results
+      });
+    });
+
+  } catch (error) {
+    return res.status(500).json({
+      success: false,
+      message: "Internal server error",
+      error: error.message
+    });
+  }
+};
+
+const updatePatientPharmacy = async (req, res) => {
+  try {
+    const { id } = req.params;
+    const { drugId, quantity } = req.body;
+
+    if (!id || isNaN(id)) {
+      return res.status(400).json({
+        success: false,
+        message: "Invalid or missing patient_pharmacy ID"
+      });
+    }
+
+    if (!drugId || isNaN(drugId)) {
+      return res.status(400).json({
+        success: false,
+        message: "Invalid or missing drugId"
+      });
+    }
+
+    if (!quantity || isNaN(quantity)) {
+      return res.status(400).json({
+        success: false,
+        message: "Enter a valid quantity"
+      });
+    }
+
+    // Step 1: Get the existing patient_pharmacy record
+    const getOldRecordQuery = `SELECT * FROM patient_pharmacy WHERE id = ?`;
+    pool.query(getOldRecordQuery, [id], (err, oldResult) => {
+      if (err) {
+        return res.status(500).json({
+          success: false,
+          message: "Error fetching patient pharmacy record",
+          error: err.message
+        });
+      }
+
+      if (oldResult.length === 0) {
+        return res.status(404).json({
+          success: false,
+          message: "Patient pharmacy record not found"
+        });
+      }
+
+      const oldRecord = oldResult[0];
+
+      // Step 2: Get the old and new drug records
+      const getDrugQuery = `SELECT * FROM drugs WHERE id IN (?, ?)`;
+      pool.query(getDrugQuery, [oldRecord.drugId, drugId], (drugErr, drugResults) => {
+        if (drugErr) {
+          return res.status(500).json({
+            success: false,
+            message: "Error fetching drug info",
+            error: drugErr.message
+          });
+        }
+
+        const oldDrug = drugResults.find(d => d.id === oldRecord.drugId);
+        const newDrug = drugResults.find(d => d.id === parseInt(drugId));
+
+        if (!newDrug) {
+          return res.status(404).json({
+            success: false,
+            message: "New drug not found"
+          });
+        }
+
+        // Step 3: Adjust quantity check
+        let rollbackQty = oldRecord.quantity;
+        let availableStock = newDrug.quantity + rollbackQty;
+
+        if (quantity > availableStock) {
+          return res.status(400).json({
+            success: false,
+            message: "Insufficient stock for the selected drug"
+          });
+        }
+
+        const updatedPrice = quantity * newDrug.price;
+
+        // Step 4: Update patient_pharmacy
+        const updatePharmacyQuery = `
+          UPDATE patient_pharmacy 
+          SET drugId = ?, quantity = ?, price = ?
+          WHERE id = ?
+        `;
+
+        pool.query(updatePharmacyQuery, [drugId, quantity, updatedPrice, id], (updateErr, updateResult) => {
+          if (updateErr) {
+            return res.status(500).json({
+              success: false,
+              message: "Error updating patient pharmacy record",
+              error: updateErr.message
+            });
+          }
+
+          // Step 5: Update new drug stock
+          const newStock = availableStock - quantity;
+
+          const updateDrugStockQuery = `UPDATE drugs SET quantity = ? WHERE id = ?`;
+          pool.query(updateDrugStockQuery, [newStock, drugId], (stockErr, stockResult) => {
+            if (stockErr) {
+              return res.status(500).json({
+                success: false,
+                message: "Error updating drug stock",
+                error: stockErr.message
+              });
+            }
+
+            return res.status(200).json({
+              success: true,
+              message: "Patient pharmacy record updated successfully"
+            });
+          });
+        });
+      });
+    });
+  } catch (error) {
+    return res.status(500).json({
+      success: false,
+      message: "Internal Server Error",
+      error: error.message
+    });
+  }
+};
+
+
+const deletePatientPharmacy = async (req, res) => {
+  try {
+    const { id } = req.params;
+
+    if (!id || isNaN(id)) {
+      return res.status(400).json({
+        success: false,
+        message: "Invalid or missing drug entry ID"
+      });
+    }
+
+    // Step 1: Fetch the existing record
+    const fetchQuery = `SELECT drugId, quantity FROM patient_pharmacy WHERE id = ?`;
+    pool.query(fetchQuery, [id], (fetchErr, fetchResult) => {
+      if (fetchErr) {
+        return res.status(500).json({
+          success: false,
+          message: "Error fetching drug entry",
+          error: fetchErr.message
+        });
+      }
+
+      if (fetchResult.length === 0) {
+        return res.status(404).json({
+          success: false,
+          message: "Drug entry not found"
+        });
+      }
+
+      const { drugId, quantity } = fetchResult[0];
+
+      // Step 2: Restore stock to drugs table
+      const updateStockQuery = `UPDATE drugs SET quantity = quantity + ? WHERE id = ?`;
+      pool.query(updateStockQuery, [quantity, drugId], (updateErr, updateResult) => {
+        if (updateErr) {
+          return res.status(500).json({
+            success: false,
+            message: "Error restoring drug stock",
+            error: updateErr.message
+          });
+        }
+
+        // Step 3: Delete from patient_pharmacy
+        const deleteQuery = `DELETE FROM patient_pharmacy WHERE id = ?`;
+        pool.query(deleteQuery, [id], (deleteErr, deleteResult) => {
+          if (deleteErr) {
+            return res.status(500).json({
+              success: false,
+              message: "Error deleting drug entry",
+              error: deleteErr.message
+            });
+          }
+
+          return res.status(200).json({
+            success: true,
+            message: "Drug entry deleted and stock restored successfully"
+          });
+        });
+      });
+    });
+  } catch (error) {
+    return res.status(500).json({
+      success: false,
+      message: "Internal server error",
+      error: error.message
+    });
+  }
+};
+
 
 
 const deletePatient = async (req, res) => {
@@ -7031,6 +7529,8 @@ const getMedicalDataWithVitals = (req, res) => {
             });
           }
         });
+        console.log(prescriptions);
+        
 
         pool.query(allergyQuery, [patient_id], (err3, allergies) => {
           if (err3) return res.status(500).json({ success: false, message: "Error fetching allergies", error: err3.message });
@@ -7350,7 +7850,7 @@ const getMedicalRecordsByDate = (req, res) => {
               res.status(200).json({
                 success: true,
                 message: `Medical records for patient ${patient_id} on ${date} fetched successfully`,
-                data: enrichedRecords
+                data: enrichedRecords[0]
               });
             });
           });
@@ -8382,6 +8882,45 @@ const addPrescription = (req, res) => {
   }
 };
 
+const getAllPrescriptions = async (req, res) => {
+  try {
+    const fetchPrescriptions = () => {
+      return new Promise((resolve, reject) => {
+        const query = `
+          SELECT * from prescriptions`;
+
+        pool.query(query, (err, results) => {
+          if (err) return reject(err);
+          resolve(results);
+        });
+      });
+    };
+
+    const prescriptions = await fetchPrescriptions();
+
+    if (!prescriptions.length) {
+      return res.status(404).json({
+        success: false,
+        message: "No prescriptions found",
+        data: [],
+      });
+    }
+
+    return res.status(200).json({
+      success: true,
+      message: "Prescriptions fetched successfully",
+      data: prescriptions,
+    });
+
+  } catch (error) {
+    return res.status(500).json({
+      success: false,
+      message: "An error occurred while retrieving prescriptions",
+      error: error.message,
+    });
+  }
+};
+
 const updatePrescription = (req, res) => {
   const { id } = req.params; // prescription id
   const {
@@ -9116,8 +9655,12 @@ export default {
   // Patient service apis
   AddPatientServices,
   GetPatientServices,
+  UpdatePatientServices,
   DeletePatientService,
-  
+  addPatientPharmacy,
+  getPharmacyByPatientId,
+  updatePatientPharmacy,
+  deletePatientPharmacy,
   // appointment apis
   createAppointment,
   getAllAppointments,
@@ -9254,6 +9797,7 @@ export default {
   addDiagnosis,
   updateDiagnosis,
   addPrescription,
+  getAllPrescriptions,
   updatePrescription,
   getPrescriptionById,
   addChronicIllness,
