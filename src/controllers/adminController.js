@@ -8787,7 +8787,6 @@ const addPrescription = (req, res) => {
   const { medical_id, 
     // doctor_id, 
     prescriptions } = req.body;
-  console.log(req.body)
   if (!medical_id  || !Array.isArray(prescriptions) || prescriptions.length === 0) {
     return res.status(400).json({
       success: false,
@@ -8887,7 +8886,16 @@ const getAllPrescriptions = async (req, res) => {
     const fetchPrescriptions = () => {
       return new Promise((resolve, reject) => {
         const query = `
-          SELECT * from prescriptions`;
+          SELECT 
+            prescriptions.*, 
+            TRIM(CONCAT(
+  patients.firstName, ' ',
+  IF(patients.middleName IS NOT NULL AND patients.middleName != '', CONCAT(patients.middleName, ' '), ''),
+  patients.lastName
+)) AS fullName
+          FROM prescriptions
+          JOIN patients ON prescriptions.patient_id = patients.id
+        `;
 
         pool.query(query, (err, results) => {
           if (err) return reject(err);
