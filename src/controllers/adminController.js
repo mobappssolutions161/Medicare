@@ -1490,6 +1490,7 @@ const GetPatientServices = async (req, res) => {
         ps.discount_value,
         ps.net_amount, 
         ps.status,
+        ps.billing_status,
         ps.createdAt,
         ps.updatedAt,
         s.serviceCode,
@@ -1714,6 +1715,80 @@ const DeletePatientService = async (req, res) => {
   }
 };
 
+const getPatientServicesByPatientId = (req, res) => {
+  try {
+    const patientId = req.params.id;
+
+    if (!patientId) {
+      return res.status(400).json({
+        success: false,
+        message: "Patient ID is required",
+      });
+    }
+
+    const query = `SELECT * FROM patient_services WHERE patientId = ? AND status = 'Complete' AND billing_status = 'Not Billed'`;
+
+    pool.query(query, [patientId], (error, results) => {
+      if (error) {
+        return res.status(500).json({
+          success: false,
+          message: "Database error while fetching patient services",
+          error: error.message,
+        });
+      }
+
+      return res.status(200).json({
+        success: true,
+        message: "Patient services fetched successfully",
+        data: results,
+      });
+    });
+  } catch (error) {
+    return res.status(500).json({
+      success: false,
+      message: "Server error",
+      error: error.message,
+    });
+  }
+};
+
+const getPatientPharmacyByPatientId = (req, res) => {
+  try {
+    const patientId = req.params.id;
+
+    if (!patientId) {
+      return res.status(400).json({
+        success: false,
+        message: "Patient ID is required",
+      });
+    }
+
+    const query = `SELECT * FROM patient_pharmacy WHERE patient_id = ? AND status = 'complete' AND billing_status = 'not billed'`;
+
+    pool.query(query, [patientId], (error, results) => {
+      if (error) {
+        return res.status(500).json({
+          success: false,
+          message: "Database error while fetching patient pharmacy data",
+          error: error.message,
+        });
+      }
+
+      return res.status(200).json({
+        success: true,
+        message: "Patient pharmacy data fetched successfully",
+        data: results,
+      });
+    });
+  } catch (error) {
+    return res.status(500).json({
+      success: false,
+      message: "Server error",
+      error: error.message,
+    });
+  }
+};
+
 const addPatientPharmacy = async (req, res) => {
   try {
     const patientId = req.params.patientId;
@@ -1845,6 +1920,8 @@ const getPharmacyByPatientId = async (req, res) => {
         pp.id,
         pp.patient_id,
         pp.drugId,
+        pp.status,
+        pp.billing_status,
         pp.created_at,
         d.name AS drug_name,
         pp.quantity,
@@ -1875,6 +1952,7 @@ const getPharmacyByPatientId = async (req, res) => {
 
       return res.status(200).json({
         success: true,
+        message : "Patient pharmacy retrieved successfully",
         data: results
       });
     });
@@ -2084,7 +2162,105 @@ const deletePatientPharmacy = async (req, res) => {
   }
 };
 
+const updatePatientServicesStatus = (req, res) => {
+  try {
+    const id = req.params.id;
+    const status = req.body.status;
 
+    if (!status) {
+      return res.status(400).json({
+        success: false,
+        message: "Status is required",
+      });
+    }
+
+    if (!id) {
+      return res.status(400).json({
+        success: false,
+        message: "ID is required",
+      });
+    }
+
+    const query = `UPDATE patient_services SET status = ? WHERE id = ?`;
+    pool.query(query, [status, id], (error, results) => {
+      if (error) {
+        return res.status(500).json({
+          success: false,
+          message: "Server error",
+          error: error.message,
+        });
+      }
+
+      if (results.affectedRows === 0) {
+        return res.status(404).json({
+          success: false,
+          message: "Record not found",
+        });
+      }
+
+      return res.status(200).json({
+        success: true,
+        message: "Status updated successfully for patient_services",
+      });
+    });
+  } catch (error) {
+    return res.status(500).json({
+      success: false,
+      message: "Server error",
+      error: error.message,
+    });
+  }
+};
+
+const updatePatientPharmacyStatus = (req, res) => {
+  try {
+    const id = req.params.id;
+    const status = req.body.status;
+
+    if (!status) {
+      return res.status(400).json({
+        success: false,
+        message: "Status is required",
+      });
+    }
+
+    if (!id) {
+      return res.status(400).json({
+        success: false,
+        message: "ID is required",
+      });
+    }
+
+    const query = `UPDATE patient_pharmacy SET status = ? WHERE id = ?`;
+    pool.query(query, [status, id], (error, results) => {
+      if (error) {
+        return res.status(500).json({
+          success: false,
+          message: "Server error",
+          error: error.message,
+        });
+      }
+
+      if (results.affectedRows === 0) {
+        return res.status(404).json({
+          success: false,
+          message: "Record not found",
+        });
+      }
+
+      return res.status(200).json({
+        success: true,
+        message: "Status updated successfully for patient_pharmacy",
+      });
+    });
+  } catch (error) {
+    return res.status(500).json({
+      success: false,
+      message: "Server error",
+      error: error.message,
+    });
+  }
+};
 
 const deletePatient = async (req, res) => {
   try {
@@ -2229,6 +2405,9 @@ const createAppointment = (req, res) => {
     reason,
     status: userStatus // new optional field
   } = req.body;
+
+  console.log(req.body);
+  
 
   if (!patientId || !appointmentDate) {
     return res.status(400).json({
@@ -6263,7 +6442,7 @@ const getLabRequestById = (req, res) => {
       });
     });
   });
-};
+};1
 
 const deleteLabRequest = (req, res) => {
   const { id } = req.params;
@@ -8242,7 +8421,7 @@ const getAllTablesText = async (req, res) => {
     if (!table) {
       return res.status(400).json({
         success: false,
-        message: "Table name is required (e.g., chief_complaints, examination_general)"
+        message: "Table name is required"
       });
     }
 
@@ -9638,6 +9817,516 @@ const updateInsuranceStatus = async (req, res) => {
   }
 };
 
+const createInvoice = (req, res) => {
+  const { patientId, services = [], pharmacy = [] } = req.body;
+
+  if (!patientId) {
+    return res.status(400).json({ success: false, message: "patientId is required" });
+  }
+
+  if (!Array.isArray(services) || !Array.isArray(pharmacy)) {
+    return res.status(400).json({ success: false, message: "services and pharmacy must be arrays" });
+  }
+
+  if (services.length === 0 && pharmacy.length === 0) {
+    return res.status(400).json({ success: false, message: "At least one service or pharmacy item must be provided" });
+  }
+
+  pool.getConnection((err, connection) => {
+    if (err) {
+      return res.status(500).json({ success: false, message: "DB connection error", error: err.message });
+    }
+
+    connection.beginTransaction(transactionErr => {
+      if (transactionErr) {
+        connection.release();
+        return res.status(500).json({ success: false, message: "Transaction error", error: transactionErr.message });
+      }
+
+      // ---- Step 1: Fetch services safely ----
+      const fetchServices = (callback) => {
+        if (services.length === 0) return callback(null, []);
+        connection.query(
+          `SELECT id, net_amount AS amount FROM patient_services WHERE id IN (?)`,
+          [services],
+          callback
+        );
+      };
+
+      // ---- Step 2: Fetch pharmacy safely ----
+      const fetchPharmacy = (callback) => {
+        if (pharmacy.length === 0) return callback(null, []);
+        connection.query(
+          `SELECT id, price AS amount FROM patient_pharmacy WHERE id IN (?)`,
+          [pharmacy],
+          callback
+        );
+      };
+
+      // Run both queries
+      fetchServices((serviceErr, serviceResults) => {
+        if (serviceErr) return rollbackAndRelease(connection, res, serviceErr);
+
+        fetchPharmacy((pharmacyErr, pharmacyResults) => {
+          if (pharmacyErr) return rollbackAndRelease(connection, res, pharmacyErr);
+
+          const total_services = serviceResults.length + pharmacyResults.length;
+
+          if (total_services === 0) {
+            connection.release();
+            return res.status(400).json({
+              success: false,
+              message: "No services or pharmacy items found.",
+            });
+          }
+
+          const total_amount =
+            serviceResults.reduce((sum, item) => sum + (item.amount || 0), 0) +
+            pharmacyResults.reduce((sum, item) => sum + (item.amount || 0), 0);
+
+          const paid_amount = 0;
+          const remaining_amount = total_amount - paid_amount;
+const invoice_no = "INV-" + Date.now().toString().slice(-6);
+          const status = remaining_amount > 0 ? "Remaining" : "Complete";
+          const invoice_status = "Not Paid";
+
+          // ---- Step 3: Insert into patient_invoices ----
+          const insertInvoiceQuery = `
+            INSERT INTO patient_invoices 
+              (patient_id, invoice_date, invoice_no, total_services, total_amount, paid_amount, remaining_amount, status, invoice_status, updated_at)
+            VALUES (?, NOW(), ?, ?, ?, ?, ?, ?, ?, NOW())
+          `;
+
+          connection.query(
+            insertInvoiceQuery,
+            [
+              patientId,
+              invoice_no,
+              total_services,
+              total_amount,
+              paid_amount,
+              remaining_amount,
+              status,
+              invoice_status,
+            ],
+            (insertErr, insertResult) => {
+              if (insertErr) {
+                return rollbackAndRelease(connection, res, insertErr);
+              }
+
+              const invoiceId = insertResult.insertId;
+
+              // ---- Step 4: Update statuses ----
+              const serviceIds = serviceResults.map((item) => item.id);
+              const pharmacyIds = pharmacyResults.map((item) => item.id);
+
+              const updateServiceStatus = (callback) => {
+                if (serviceIds.length === 0) return callback();
+                connection.query(
+                  `UPDATE patient_services SET billing_status = 'Billed' WHERE id IN (?)`,
+                  [serviceIds],
+                  (err) => callback(err)
+                );
+              };
+
+              const updatePharmacyStatus = (callback) => {
+                if (pharmacyIds.length === 0) return callback();
+                connection.query(
+                  `UPDATE patient_pharmacy SET billing_status = 'Billed' WHERE id IN (?)`,
+                  [pharmacyIds],
+                  (err) => callback(err)
+                );
+              };
+
+              // ---- Step 5: Commit transaction ----
+              updateServiceStatus((serviceUpdateErr) => {
+                if (serviceUpdateErr) return rollbackAndRelease(connection, res, serviceUpdateErr);
+
+                updatePharmacyStatus((pharmacyUpdateErr) => {
+                  if (pharmacyUpdateErr) return rollbackAndRelease(connection, res, pharmacyUpdateErr);
+
+                  connection.commit((commitErr) => {
+                    connection.release();
+                    if (commitErr) {
+                      return res.status(500).json({
+                        success: false,
+                        message: "Commit error",
+                        error: commitErr.message,
+                      });
+                    }
+
+                    return res.status(201).json({
+                      success: true,
+                      message: "Invoice created and billing status updated successfully",
+                      data : {
+                        invoiceId,
+                      invoice_no,
+                      patientId,
+                      total_services,
+                      total_amount,
+                      paid_amount,
+                      remaining_amount,
+                      status,
+                      invoice_status,
+                      }
+                    });
+                  });
+                });
+              });
+            }
+          );
+        });
+      });
+    });
+  });
+};
+
+function rollbackAndRelease(connection, res, error) {
+  console.log("SQL Error:", error); // ✅ debugging log
+  connection.rollback(() => {
+    connection.release();
+    res.status(500).json({ success: false, message: "Transaction failed", error: error.message });
+  });
+}
+
+const getAllInvoicesByPatient = (req,res)=>{
+  try {
+    const patientId = req.params.patientId
+    if(!patientId){
+      return res.status(400).json({
+        success : false,
+        message : "Patient id is requied"
+      })
+    }
+
+    const selectQuery = `Select * from patient_invoices where patient_id = ?`
+    pool.query(selectQuery,[patientId],(error,result)=>{
+      if(error){
+        return res.status(500).json({
+          success :  false,
+          message: "Error while fetching patient invoices",
+          error : error.message
+        })
+      }
+      if(result.length===0){
+      return res.status(400).json({
+          success :  false,
+          message: "Invoices for this patient are empty",
+        })
+      }
+      return res.status(200).json({
+        success : true,
+        message : "Patient invoice fetched successfully",
+        data : result
+      })
+    })
+
+  } catch (error) {
+    return res.status(500).json({ success: false, message: "Internal Server Error", error: error.message });
+ 
+  }
+}
+
+const getRemainingInvoices = (req, res) => {
+  const { patientId } = req.params;
+
+  if (!patientId) {
+    return res.status(400).json({
+      success: false,
+      message: "patientId is required",
+    });
+  }
+
+  const sql = `
+    SELECT 
+      id AS invoiceId,
+      invoice_no,
+      invoice_date,
+      total_services,
+      total_amount,
+      paid_amount,
+      remaining_amount,
+      status,
+      invoice_status,
+      updated_at
+    FROM patient_invoices
+    WHERE patient_id = ? AND status = 'Remaining'
+    ORDER BY invoice_date DESC
+  `;
+
+  pool.query(sql, [patientId], (err, results) => {
+    if (err) {
+      return res.status(500).json({
+        success: false,
+        message: "DB error",
+        error: err.message,
+      });
+    }
+
+    return res.status(200).json({
+      success: true,
+      count: results.length,
+      invoices: results,
+    });
+  });
+};
+
+const addPaymentInvoice = (req, res) => {
+  const { invoice_id, amount, payment_method } = req.body;
+
+  // Basic validation
+  if (!invoice_id || !amount || !payment_method) {
+    return res.status(400).json({
+      success: false,
+      message: "invoice_id, amount, and payment_method are required",
+    });
+  }
+
+  // Amount validation
+  if (isNaN(amount) || amount <= 0) {
+    return res.status(400).json({
+      success: false,
+      message: "Amount must be a positive number greater than 0",
+    });
+  }
+
+  pool.getConnection((err, connection) => {
+    if (err) {
+      return res
+        .status(500)
+        .json({ success: false, message: "DB connection error", error: err });
+    }
+
+    connection.beginTransaction(async (err) => {
+      if (err) {
+        connection.release();
+        return res.status(500).json({
+          success: false,
+          message: "Transaction start failed",
+          error: err,
+        });
+      }
+
+      try {
+        // Step 1: Get invoice
+        const [invoice] = await new Promise((resolve, reject) => {
+          connection.query(
+            "SELECT id, patient_id,invoice_no, total_amount, paid_amount, remaining_amount, status, invoice_status FROM patient_invoices WHERE id = ?",
+            [invoice_id],
+            (err, results) => (err ? reject(err) : resolve(results))
+          );
+        });
+
+        if (!invoice) {
+          connection.release();
+          return res
+            .status(404)
+            .json({ success: false, message: "Invoice not found" });
+        }
+
+        // Validation: Invoice already cleared
+        if (invoice.remaining_amount <= 0) {
+          connection.release();
+          return res.status(400).json({
+            success: false,
+            message: "Invoice already fully paid",
+          });
+        }
+
+        // Validation: Amount > Remaining
+        if (amount > invoice.remaining_amount) {
+          connection.release();
+          return res.status(400).json({
+            success: false,
+            message: `Payment exceeds remaining amount. Remaining: ${invoice.remaining_amount}`,
+          });
+        }
+
+        const transactionId = String(
+          Math.floor(1000000000 + Math.random() * 9000000000)
+        );
+
+        // Step 2: Insert into payments
+        await new Promise((resolve, reject) => {
+          connection.query(
+            "INSERT INTO patient_payment_invoices (patient_id,invoice_id, payment_amount, payment_method, transactionId) VALUES (?,?, ?, ?, ?)",
+            [invoice.patient_id,invoice.id, amount, payment_method, transactionId],
+            (err, result) => (err ? reject(err) : resolve(result))
+          );
+        });
+
+        // Step 3: Update invoice (paid + remaining + status)
+        const newPaid = invoice.paid_amount + amount;
+        const newRemaining = invoice.remaining_amount - amount;
+
+        let newStatus = "Remaining";
+        let newInvoiceStatus = "Partially Paid";
+
+        if (newRemaining === 0) {
+          newStatus = "Completed";
+          newInvoiceStatus = "Fully Paid";
+        } else if (newPaid === 0) {
+          newInvoiceStatus = "Not Paid";
+        }
+
+        await new Promise((resolve, reject) => {
+          connection.query(
+            "UPDATE patient_invoices SET paid_amount = ?, remaining_amount = ?, status = ?, invoice_status = ? WHERE id = ?",
+            [newPaid, newRemaining, newStatus, newInvoiceStatus, invoice_id],
+            (err, result) => (err ? reject(err) : resolve(result))
+          );
+        });
+
+        // Commit
+        connection.commit((err) => {
+          if (err) {
+            return connection.rollback(() => {
+              connection.release();
+              res.status(500).json({
+                success: false,
+                message: "Commit failed",
+                error: err,
+              });
+            });
+          }
+
+          connection.release();
+          return res.status(200).json({
+            success: true,
+            message: "Payment added successfully",
+            data: {
+              invoice_id,
+              newPaid,
+              newRemaining,
+              status: newStatus,
+              invoice_status: newInvoiceStatus,
+            },
+          });
+        });
+      } catch (error) {
+        connection.rollback(() => {
+          connection.release();
+          return res.status(500).json({
+            success: false,
+            message: "Transaction failed",
+            error: error.message,
+          });
+        });
+      }
+    });
+  });
+};
+
+const getPaymentsByPatient = (req, res) => {
+  const { patient_id } = req.params;
+
+  if (!patient_id) {
+    return res.status(400).json({
+      success: false,
+      message: "patient_id is required",
+    });
+  }
+
+  const sql = `
+    SELECT 
+      ppi.id AS payment_id,
+      ppi.invoice_id as invoice_id,
+      pi.invoice_no,
+      ppi.payment_amount,
+      ppi.payment_method,
+      ppi.transactionId,
+      ppi.payment_date
+    FROM patient_payment_invoices ppi
+    INNER JOIN patient_invoices pi ON ppi.invoice_id = pi.id
+    WHERE ppi.patient_id = ?
+    ORDER BY ppi.payment_date DESC
+  `;
+
+  pool.query(sql, [patient_id], (err, results) => {
+    if (err) {
+      return res.status(500).json({
+        success: false,
+        message: "DB error",
+        error: err,
+      });
+    }
+
+    return res.status(200).json({
+      success: true,
+      message: results.length > 0 ? "Payments fetched successfully" : "No payments found",
+      data: results,
+    });
+  });
+};
+
+
+const getPatientPaymentSummary = (req, res) => {
+  const { patient_id } = req.params;
+
+  if (!patient_id) {
+    return res.status(400).json({
+      success: false,
+      message: "patient_id is required"
+    });
+  }
+
+  const sql = `SELECT total_amount, remaining_amount, paid_amount, updated_at 
+               FROM patient_invoices 
+               WHERE patient_id = ?`;
+
+  pool.query(sql, [patient_id], (err, results) => {
+    if (err) {
+      return res.status(500).json({
+        success: false,
+        message: "Database error",
+        error: err
+      });
+    }
+
+    if (!results.length) {
+      return res.status(200).json({
+        success: true,
+        message: "No invoices found for this patient",
+        data: {
+          total_billed: 0,
+          pending_balance: 0,
+          total_payments: 0,
+          last_payment_date: null
+        }
+      });
+    }
+
+    // 🔹 Calculation in Node.js
+    let total_billed = 0;
+    let pending_balance = 0;
+    let total_payments = 0;
+    let last_payment_date = null;
+
+    results.forEach(row => {
+      total_billed += row.total_amount || 0;
+      pending_balance += row.remaining_amount || 0;
+      total_payments += row.paid_amount || 0;
+
+      if (!last_payment_date || new Date(row.updated_at) > new Date(last_payment_date)) {
+        last_payment_date = row.updated_at;
+      }
+    });
+
+    return res.status(200).json({
+      success: true,
+      message: "Patient payment summary fetched successfully",
+      data: {
+        total_billed,
+        pending_balance,
+        total_payments,
+        last_payment_date
+      }
+    });
+  });
+};
+
+
+
 export default {
   
   // users apis 
@@ -9665,10 +10354,14 @@ export default {
   GetPatientServices,
   UpdatePatientServices,
   DeletePatientService,
+  getPatientServicesByPatientId,
   addPatientPharmacy,
   getPharmacyByPatientId,
   updatePatientPharmacy,
   deletePatientPharmacy,
+  getPatientPharmacyByPatientId,
+  updatePatientServicesStatus,
+  updatePatientPharmacyStatus,
   // appointment apis
   createAppointment,
   getAllAppointments,
@@ -9823,6 +10516,13 @@ export default {
   getInsurance,
   updateInsurance,
   deleteInsurance,
-  updateInsuranceStatus
+  updateInsuranceStatus,
+
+  createInvoice,
+  getAllInvoicesByPatient,
+  getRemainingInvoices,
+  addPaymentInvoice,
+  getPaymentsByPatient,
+  getPatientPaymentSummary
 };
 

@@ -42,6 +42,10 @@ router.post("/addPatientPharmacy/:patientId", adminController.addPatientPharmacy
 router.get("/getPharmacyByPatientId/:patientId", adminController.getPharmacyByPatientId)
 router.put("/updatePatientPharmacy/:id", adminController.updatePatientPharmacy)
 router.delete("/deletePatientPharmacy/:id", adminController.deletePatientPharmacy)
+router.get('/getPatientServicesByPatientId/:id', adminController.getPatientServicesByPatientId);
+router.get('/getPatientPharmacyByPatientId/:id', adminController.getPatientPharmacyByPatientId);
+router.put("/updatePatientServicesStatus/:id", adminController.updatePatientServicesStatus)
+router.put("/updatePatientPharmacyStatus/:id", adminController.updatePatientPharmacyStatus)
 
 router.post("/createAppointment", adminController.createAppointment)
 router.get("/getAllAppointments", adminController.getAllAppointments)
@@ -183,5 +187,12 @@ router.put('/updateInsurance/:id', adminController.updateInsurance);
 router.delete('/updateInsuranceStatus/:id', adminController.deleteInsurance);
 router.put('/updateInsuranceStatus/:id', adminController.updateInsuranceStatus);
 
+router.post('/createInvoice', adminController.createInvoice);
+router.get('/getAllInvoicesByPatient/:patientId', adminController.getAllInvoicesByPatient);
+router.get('/getRemainingInvoices/:patientId', adminController.getRemainingInvoices);
+
+router.post('/addPaymentInvoice', adminController.addPaymentInvoice);
+router.get('/getPaymentsByPatient/:patient_id', adminController.getPaymentsByPatient);
+router.get('/getPatientPaymentSummary/:patient_id', adminController.getPatientPaymentSummary);
 
 export default router;
