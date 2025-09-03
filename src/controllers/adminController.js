@@ -1726,7 +1726,22 @@ const getPatientServicesByPatientId = (req, res) => {
       });
     }
 
-    const query = `SELECT * FROM patient_services WHERE patientId = ? AND status = 'Complete' AND billing_status = 'Not Billed'`;
+    const query = `
+      SELECT 
+        ps.*, 
+        s.serviceName AS service_name,
+        s.serviceCode as service_code
+      FROM 
+        patient_services ps
+      JOIN 
+        services s 
+      ON 
+        ps.serviceId = s.id
+      WHERE 
+        ps.patientId = ? 
+        AND ps.status = 'Complete' 
+        AND ps.billing_status = 'Not Billed'
+    `;
 
     pool.query(query, [patientId], (error, results) => {
       if (error) {
@@ -1763,7 +1778,20 @@ const getPatientPharmacyByPatientId = (req, res) => {
       });
     }
 
-    const query = `SELECT * FROM patient_pharmacy WHERE patient_id = ? AND status = 'complete' AND billing_status = 'not billed'`;
+    const query = `
+      SELECT 
+        pp.*, 
+        d.name AS drug_name
+      FROM 
+        patient_pharmacy pp
+      JOIN 
+        drugs d 
+      ON 
+        pp.drugId = d.id
+      WHERE 
+        pp.patient_id = ? AND 
+        pp.billing_status = 'Not Billed'
+    `;
 
     pool.query(query, [patientId], (error, results) => {
       if (error) {
@@ -1920,7 +1948,6 @@ const getPharmacyByPatientId = async (req, res) => {
         pp.id,
         pp.patient_id,
         pp.drugId,
-        pp.status,
         pp.billing_status,
         pp.created_at,
         d.name AS drug_name,
@@ -10325,6 +10352,52 @@ const getPatientPaymentSummary = (req, res) => {
   });
 };
 
+//  Get All Invoices
+const getAllInvoices = (req, res) => {
+  const sql = "SELECT * FROM patient_invoices ORDER BY updated_at DESC";
+
+  pool.query(sql, (err, results) => {
+    if (err) {
+      return res.status(500).json({
+        success: false,
+        message: "Database query failed",
+        error: err.message,
+      });
+    }
+
+    return res.status(200).json({
+      success: true,
+      message: results.length > 0 
+        ? "All invoices fetched successfully"
+        : "No invoices found",
+      data: results,
+    });
+  });
+};
+
+
+//  Get All Payments
+const getAllPayments = (req, res) => {
+  const sql = "SELECT * FROM patient_payment_invoices ORDER BY updated_at DESC";
+
+  pool.query(sql, (err, results) => {
+    if (err) {
+      return res.status(500).json({
+        success: false,
+        message: "Database query failed",
+        error: err.message,
+      });
+    }
+
+    return res.status(200).json({
+      success: true,
+      message: results.length > 0 
+        ? "All payments fetched successfully"
+        : "No payments found",
+      data: results,
+    });
+  });
+};
 
 
 export default {
@@ -10523,6 +10596,8 @@ export default {
   getRemainingInvoices,
   addPaymentInvoice,
   getPaymentsByPatient,
-  getPatientPaymentSummary
+  getPatientPaymentSummary,
+  getAllInvoices,
+  getAllPayments
 };
 

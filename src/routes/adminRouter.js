@@ -187,6 +187,7 @@ router.put('/updateInsurance/:id', adminController.updateInsurance);
 router.delete('/updateInsuranceStatus/:id', adminController.deleteInsurance);
 router.put('/updateInsuranceStatus/:id', adminController.updateInsuranceStatus);
 
+// Billing Section
 router.post('/createInvoice', adminController.createInvoice);
 router.get('/getAllInvoicesByPatient/:patientId', adminController.getAllInvoicesByPatient);
 router.get('/getRemainingInvoices/:patientId', adminController.getRemainingInvoices);
@@ -195,4 +196,6 @@ router.post('/addPaymentInvoice', adminController.addPaymentInvoice);
 router.get('/getPaymentsByPatient/:patient_id', adminController.getPaymentsByPatient);
 router.get('/getPatientPaymentSummary/:patient_id', adminController.getPatientPaymentSummary);
 
+router.get('/getAllInvoices', adminController.getAllInvoices);
+router.get('/getAllPayments', adminController.getAllPayments);
 export default router;
