@@ -7766,7 +7766,7 @@ const getMedicalDataWithVitals = (req, res) => {
       });
     });
   });
-};
+}
 
 const getAllMedicalDataByPatient = (req, res) => {
   const { patient_id } = req.params;
@@ -10297,9 +10297,14 @@ const getPatientPaymentSummary = (req, res) => {
     });
   }
 
-  const sql = `SELECT total_amount, remaining_amount, paid_amount, updated_at 
-               FROM patient_invoices 
-               WHERE patient_id = ?`;
+  // 🔹 Query invoices + patient name
+  const sql = `
+    SELECT pi.total_amount, pi.remaining_amount, pi.paid_amount, pi.updated_at,
+           p.firstName, p.middleName, p.lastName
+    FROM patient_invoices pi
+    JOIN patients p ON pi.patient_id = p.id
+    WHERE pi.patient_id = ?
+  `;
 
   pool.query(sql, [patient_id], (err, results) => {
     if (err) {
@@ -10311,15 +10316,10 @@ const getPatientPaymentSummary = (req, res) => {
     }
 
     if (!results.length) {
-      return res.status(200).json({
-        success: true,
+      return res.status(404).json({
+        success: false,
         message: "No invoices found for this patient",
-        data: {
-          total_billed: 0,
-          pending_balance: 0,
-          total_payments: 0,
-          last_payment_date: null
-        }
+        data: []
       });
     }
 
@@ -10339,10 +10339,21 @@ const getPatientPaymentSummary = (req, res) => {
       }
     });
 
+    const total_invoices = results.length;
+    const nameParts = [
+    results[0].firstName || "",
+    results[0].middleName || "",
+    results[0].lastName || ""
+    ];
+
+    const patient_name = nameParts.filter(Boolean).join(" ");
+
     return res.status(200).json({
       success: true,
       message: "Patient payment summary fetched successfully",
       data: {
+        patient_name,
+        total_invoices,
         total_billed,
         pending_balance,
         total_payments,
@@ -10354,7 +10365,12 @@ const getPatientPaymentSummary = (req, res) => {
 
 //  Get All Invoices
 const getAllInvoices = (req, res) => {
-  const sql = "SELECT * FROM patient_invoices ORDER BY updated_at DESC";
+  const sql = `
+    SELECT pi.*, p.firstName, p.middleName, p.lastName
+    FROM patient_invoices pi
+    LEFT JOIN patients p ON pi.patient_id = p.id
+    ORDER BY pi.updated_at DESC
+  `;
 
   pool.query(sql, (err, results) => {
     if (err) {
@@ -10365,12 +10381,28 @@ const getAllInvoices = (req, res) => {
       });
     }
 
+    // 🔹 Format data with patient_name
+    const formattedResults = results.map(row => {
+      const nameParts = [
+        row.firstName || "",
+        row.middleName || "",
+        row.lastName || ""
+      ];
+      const patient_name = nameParts.filter(Boolean).join(" ");
+      const { firstName, middleName, lastName, ...rest } = row;
+
+      return {
+        ...rest,
+        patient_name
+      };
+    });
+
     return res.status(200).json({
       success: true,
-      message: results.length > 0 
+      message: formattedResults.length > 0
         ? "All invoices fetched successfully"
         : "No invoices found",
-      data: results,
+      data: formattedResults,
     });
   });
 };
@@ -10378,7 +10410,15 @@ const getAllInvoices = (req, res) => {
 
 //  Get All Payments
 const getAllPayments = (req, res) => {
-  const sql = "SELECT * FROM patient_payment_invoices ORDER BY updated_at DESC";
+  const sql = `
+    SELECT ppi.*, 
+           pi.invoice_no, 
+           pt.firstName, pt.middleName, pt.lastName
+    FROM patient_payment_invoices ppi
+    LEFT JOIN patient_invoices pi ON ppi.invoice_id = pi.id
+    LEFT JOIN patients pt ON pi.patient_id = pt.id
+    ORDER BY ppi.updated_at DESC
+  `;
 
   pool.query(sql, (err, results) => {
     if (err) {
@@ -10389,12 +10429,31 @@ const getAllPayments = (req, res) => {
       });
     }
 
+    // 🔹 Format results
+    const formattedResults = results.map(row => {
+      const nameParts = [
+        row.firstName || "",
+        row.middleName || "",
+        row.lastName || ""
+      ];
+      const patient_name = nameParts.filter(Boolean).join(" ");
+
+      // remove raw name fields
+      const { firstName, middleName, lastName, ...rest } = row;
+
+      return {
+        ...rest,
+        patient_name,
+        invoice_no: row.invoice_no || null
+      };
+    });
+
     return res.status(200).json({
       success: true,
-      message: results.length > 0 
+      message: formattedResults.length > 0 
         ? "All payments fetched successfully"
         : "No payments found",
-      data: results,
+      data: formattedResults,
     });
   });
 };
