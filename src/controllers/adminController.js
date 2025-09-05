@@ -1521,12 +1521,15 @@ const GetPatientServices = async (req, res) => {
       // Calculate totals
       let planTotal = 0;
       let completedTotal = 0;
-
+      let totalPlanServices = 0
+      let totalCompleteServices =0
       results.forEach(service => {
         if (service.status === "Plan") {
           planTotal += service.net_amount || 0;
+          totalPlanServices += 1 || 0
         } else if (service.status === "Complete") {
           completedTotal += service.net_amount || 0;
+          totalCompleteServices += 1 || 0
         }
       });
 
@@ -1536,6 +1539,8 @@ const GetPatientServices = async (req, res) => {
         success: true,
         message: "All patient services fetched successfully",
         data: {
+          totalPlanServices,
+          totalCompleteServices,
           planTotal,
           completedTotal,
           totalSum,
