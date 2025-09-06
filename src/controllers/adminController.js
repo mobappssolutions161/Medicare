@@ -2437,8 +2437,6 @@ const createAppointment = (req, res) => {
     reason,
     status: userStatus // new optional field
   } = req.body;
-
-  console.log(req.body);
   
 
   if (!patientId || !appointmentDate) {
@@ -10463,6 +10461,121 @@ const getAllPayments = (req, res) => {
   });
 };
 
+function createPaymentMethod(req, res) {
+  const { name } = req.body;
+
+  // Validation
+  if (!name || name.trim() === "") {
+    return res.status(400).json({ success: false, message: "Name is required" });
+  }
+  if (name.length > 50) {
+    return res.status(400).json({ success: false, message: "Name too long (max 50 chars)" });
+  }
+ 
+  // Check if already exists
+  const checkSql = "SELECT id FROM payment_methods WHERE name = ?";
+  pool.query(checkSql, [name], function (err, results) {
+    if (err) {
+      return res.status(500).json({ success: false, message: "DB error", error: err.message });
+    }
+    if (results.length > 0) {
+      return res.status(409).json({ success: false, message: "Payment method already exists" });
+    }
+
+    // Insert if not exists
+    const insertSql = "INSERT INTO payment_methods (name) VALUES (?)";
+    pool.query(insertSql, [name], function (err, result) {
+      if (err) {
+        return res.status(500).json({ success: false, message: "DB error", error: err.message });
+      }
+      return res.status(201).json({ success: true, message: "Payment method created", id: result.insertId });
+    });
+  });
+}
+
+//  Get all payment methods
+function getAllPaymentMethods(req, res) {
+  const sql = "SELECT * FROM payment_methods ORDER BY updated_at DESC";
+  pool.query(sql, function (err, results) {
+    if (err) {
+      return res.status(500).json({ success: false, message: "DB error", error: err.message });
+    }
+    return res.status(200).json({ success: true, data: results });
+  });
+}
+
+//  Get by ID
+function getPaymentMethodById(req, res) {
+  const { id } = req.params;
+  if (!id || isNaN(id)) {
+    return res.status(400).json({ success: false, message: "Valid ID required" });
+  }
+
+  const sql = "SELECT * FROM payment_methods WHERE id = ?";
+  pool.query(sql, [id], function (err, results) {
+    if (err) {
+      return res.status(500).json({ success: false, message: "DB error", error: err.message });
+    }
+    if (results.length === 0) {
+      return res.status(404).json({ success: false, message: "Not found" });
+    }
+    return res.status(200).json({ success: true, data: results[0] });
+  });
+}
+
+//  Update method
+function updatePaymentMethod(req, res) {
+  const { id } = req.params;
+  const { name } = req.body;
+
+  if (!id || isNaN(id)) {
+    return res.status(400).json({ success: false, message: "Valid ID required" });
+  }
+  if (!name || name.trim() === "") {
+    return res.status(400).json({ success: false, message: "Name is required" });
+  }
+
+  // Prevent duplicates
+  const checkSql = "SELECT id FROM payment_methods WHERE name = ? AND id != ?";
+  pool.query(checkSql, [name, id], function (err, results) {
+    if (err) {
+      return res.status(500).json({ success: false, message: "DB error", error: err.message });
+    }
+    if (results.length > 0) {
+      return res.status(409).json({ success: false, message: "Payment method with this name already exists" });
+    }
+
+    const sql = "UPDATE payment_methods SET name = ? WHERE id = ?";
+    pool.query(sql, [name, id], function (err, result) {
+      if (err) {
+        return res.status(500).json({ success: false, message: "DB error", error: err.message });
+      }
+      if (result.affectedRows === 0) {
+        return res.status(404).json({ success: false, message: "Not found" });
+      }
+      return res.status(200).json({ success: true, message: "Payment method updated" });
+    });
+  });
+}
+
+//  Delete method
+function deletePaymentMethod(req, res) {
+  const { id } = req.params;
+  if (!id || isNaN(id)) {
+    return res.status(400).json({ success: false, message: "Valid ID required" });
+  }
+
+  const sql = "DELETE FROM payment_methods WHERE id = ?";
+  pool.query(sql, [id], function (err, result) {
+    if (err) {
+      return res.status(500).json({ success: false, message: "DB error", error: err.message });
+    }
+    if (result.affectedRows === 0) {
+      return res.status(404).json({ success: false, message: "Not found" });
+    }
+    return res.status(200).json({ success: true, message: "Payment method deleted" });
+  });
+}
 
 export default {
   
@@ -10662,6 +10775,12 @@ export default {
   getPaymentsByPatient,
   getPatientPaymentSummary,
   getAllInvoices,
-  getAllPayments
+  getAllPayments,
+
+  createPaymentMethod,
+  getAllPaymentMethods,
+  getPaymentMethodById,
+  updatePaymentMethod,
+  deletePaymentMethod
 };
 

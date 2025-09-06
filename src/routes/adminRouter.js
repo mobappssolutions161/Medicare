@@ -198,4 +198,11 @@ router.get('/getPatientPaymentSummary/:patient_id', adminController.getPatientPa
 
 router.get('/getAllInvoices', adminController.getAllInvoices);
 router.get('/getAllPayments', adminController.getAllPayments);
+
+router.post('/createPaymentMethod', adminController.createPaymentMethod);
+router.get('/getAllPaymentMethods', adminController.getAllPaymentMethods);
+router.get('/getPaymentMethodById/:id', adminController.getPaymentMethodById);
+router.put('/updatePaymentMethod/:id', adminController.updatePaymentMethod);
+router.delete('/deletePaymentMethod/:id', adminController.deletePaymentMethod);
+
 export default router;
