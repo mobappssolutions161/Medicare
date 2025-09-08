@@ -1,4 +1,5 @@
 
+// import { log } from "winston";
 import pool from "../config/db.js";
 // import bcrypt from "bcrypt";
 
@@ -1380,7 +1381,7 @@ const AddPatientServices = async (req, res) => {
   try {
     const { patientId, serviceId, discount_type, discount_value, extra_notes } = req.body;
 
-    // Step 1: Validation
+    // Step 1: Validate required fields
     if (!patientId || !serviceId) {
       return res.status(400).json({
         success: false,
@@ -1388,81 +1389,143 @@ const AddPatientServices = async (req, res) => {
       });
     }
 
-    // Step 2: Check service and get cost
-    const serviceQuery = `SELECT standardCost FROM services WHERE id = ?`;
-
-    pool.query(serviceQuery, [serviceId], (err, serviceResult) => {
-      if (err) {
-        return res.status(500).json({ success: false, message: "Database error", error: err.message });
+    // Step 2: Get global discount
+    const discountQuery = `SELECT discount_value FROM discounts LIMIT 1`;
+    
+    pool.query(discountQuery, (discErr, discResult) => {
+      console.log(discResult);
+      
+      if (discErr) {
+        return res.status(500).json({
+          success: false,
+          message: "Database error while fetching global discount",
+          error: discErr.message,
+        });
       }
 
-      if (serviceResult.length === 0) {
-        return res.status(404).json({ success: false, message: "Service not found" });
+      if (discResult.length === 0) {
+        return res.status(500).json({
+          success: false,
+          message: "Global discount value not set. Please configure it first.",
+        });
       }
 
-      const { standardCost } = serviceResult[0];
+      const globalDiscount = discResult[0].discount_value;
 
-      // Step 3: Check for duplicate (patientId + serviceId)
-      const duplicateQuery = `SELECT id FROM patient_services WHERE patientId = ? AND serviceId = ?`;
-      pool.query(duplicateQuery, [patientId, serviceId], (dupErr, dupResult) => {
-        if (dupErr) {
-          return res.status(500).json({ success: false, message: "Database error", error: dupErr.message });
+      // Step 3: Get service cost
+      const serviceQuery = `SELECT standardCost FROM services WHERE id = ?`;
+
+      pool.query(serviceQuery, [serviceId], (serviceErr, serviceResult) => {
+        if (serviceErr) {
+          return res.status(500).json({
+            success: false,
+            message: "Database error while fetching service cost",
+            error: serviceErr.message,
+          });
         }
 
-        if (dupResult.length > 0) {
-          return res.status(400).json({ success: false, message: "This service is already added for the patient" });
+        if (serviceResult.length === 0) {
+          return res.status(404).json({
+            success: false,
+            message: "Service not found",
+          });
         }
 
-        // Step 4: Calculate net amount
-        let netAmount = standardCost;
+        const { standardCost } = serviceResult[0];
 
-        if (discount_type === "Amount") {
-          netAmount = standardCost - discount_value;
-        } else if (discount_type === "Percentage") {
-          netAmount = standardCost - (standardCost * discount_value / 100);
+        // Step 4: Validate discount based on type
+        if (discount_type === "Percentage" && discount_value > globalDiscount && discount_value >= 0) {
+          return res.status(400).json({
+            success: false,
+            message: `Percentage discount cannot exceed the global limit of ${globalDiscount}`,
+          });
         }
 
-        if (netAmount < 0) netAmount = 0; // safety check
+        if (discount_type === "Amount" && discount_value > standardCost && discount_value >= 0) {
+          return res.status(400).json({
+            success: false,
+            message: `Amount discount cannot exceed the standard cost of ${standardCost}`,
+          });
+        }
 
-        // Step 5: Insert into patient_services
-        const insertQuery = `
-          INSERT INTO patient_services 
-          (patientId, serviceId, amount, discount_type, discount_value, net_amount, extra_notes)
-          VALUES (?, ?, ?, ?, ?, ?, ?)
-        `;
+        // Step 5: Check for duplicate
+        const duplicateQuery = `SELECT id FROM patient_services WHERE patientId = ? AND serviceId = ?`;
+        
 
-        pool.query(
-          insertQuery,
-          [
-            patientId,
-            serviceId,
-            standardCost,
-            discount_type || null,
-            discount_value || 0,
-            netAmount,
-            extra_notes || null,
-          ],
-          (err2, result) => {
-            if (err2) {
-              return res.status(500).json({ success: false, message: "Database insert error", error: err2.message });
-            }
+        pool.query(duplicateQuery, [patientId, serviceId], (dupErr, dupResult) => {
 
-            res.status(201).json({
-              success: true,
-              message: "Patient service created successfully",
-              data: {
-                id: result.insertId,
-                patientId,
-                serviceId,
-                standardCost,
-                discount_type,
-                discount_value,
-                netAmount,
-                extra_notes,
-              }
+          console.log(dupResult)
+
+          if (dupErr) {
+            return res.status(500).json({
+              success: false,
+              message: "Database error while checking duplicates",
+              error: dupErr.message,
             });
           }
-        );
+
+          if (dupResult.length > 0) {
+            return res.status(400).json({
+              success: false,
+              message: "This service is already added for the patient",
+            });
+          }
+
+          // Step 6: Calculate net amount
+          let netAmount = standardCost;
+
+          if (discount_type === "Amount") {
+            netAmount = standardCost - discount_value;
+          } else if (discount_type === "Percentage") {
+            netAmount = standardCost - (standardCost * discount_value / 100);
+          }
+
+          if (netAmount < 0) netAmount = 0;
+
+          // Step 7: Insert patient service
+          const insertQuery = `
+            INSERT INTO patient_services 
+            (patientId, serviceId, amount, discount_type, discount_value, net_amount, extra_notes)
+            VALUES (?, ?, ?, ?, ?, ?, ?)
+          `;
+
+          pool.query(
+            insertQuery,
+            [
+              patientId,
+              serviceId,
+              standardCost,
+              discount_type || null,
+              discount_value || 0,
+              netAmount,
+              extra_notes || null,
+            ],
+            (insertErr, result) => {
+              if (insertErr) {
+                return res.status(500).json({
+                  success: false,
+                  message: "Database error while inserting patient service",
+                  error: insertErr.message,
+                });
+              }
+
+              return res.status(201).json({
+                success: true,
+                message: "Patient service created successfully",
+                data: {
+                  id: result.insertId,
+                  patientId,
+                  serviceId,
+                  standardCost,
+                  discount_type,
+                  discount_value,
+                  netAmount,
+                  extra_notes,
+                },
+              });
+            }
+          );
+        });
       });
     });
   } catch (error) {
@@ -5198,25 +5261,26 @@ const addServices = async (req, res) => {
       standardCost,
       secondaryCost,
       insuranceCost,
+      vat,         // 'Yes' or 'No'
+      vat_value    // Value should be sent from frontend if vat = 'Yes'
     } = req.body;
 
     if (!serviceName || !category || !durationMinutes || !standardCost) {
       return res.status(400).json({
         success: false,
-        message:
-          "Missing required fields: serviceName, category, standardCost, or durationMinutes.",
+        message: "Missing required fields: serviceName, category, durationMinutes, or standardCost.",
       });
     }
 
-    // Step 1: Check for duplicates
+    // Step 1: Check for duplicate service name
     const checkQuery = `SELECT id FROM services WHERE serviceName = ? LIMIT 1`;
 
-    pool.query(checkQuery, [serviceName], (err, existing) => {
-      if (err) {
+    pool.query(checkQuery, [serviceName], (checkErr, existing) => {
+      if (checkErr) {
         return res.status(500).json({
           success: false,
           message: "Database error while checking duplicates",
-          error: err.message,
+          error: checkErr.message,
         });
       }
 
@@ -5227,47 +5291,71 @@ const addServices = async (req, res) => {
         });
       }
 
-      // Step 2: Insert if no duplicate
+      // Step 2: Compute final standard cost with VAT
+      let vatValueToUse = 0;
+      let finalStandardCost = parseFloat(standardCost);
+
+      if (vat === "Yes") {
+        if (vat_value === undefined || isNaN(vat_value)) {
+          return res.status(400).json({
+            success: false,
+            message: "VAT is enabled but vat_value is missing or invalid.",
+          });
+        }
+
+        vatValueToUse = parseFloat(vat_value);
+        finalStandardCost += finalStandardCost * (vatValueToUse / 100);
+      }
+
+      // Step 3: Insert new service
       const insertQuery = `
         INSERT INTO services (
-          serviceCode, serviceName, description, category, durationMinutes, standardCost, secondaryCost, insuranceCost
-        ) VALUES (?, ?, ?, ?, ?, ?, ?, ?)
+          serviceCode, serviceName, description, category, durationMinutes,
+          vat, vat_value, standardCost, secondaryCost, insuranceCost
+        ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
       `;
 
-      const serviceId = `SERVICE${generateRandomNumber(5)}`;
+      const serviceCode = `SERVICE${generateRandomNumber(5)}`;
 
-      const insertValue = [
-        serviceId,
+      const values = [
+        serviceCode,
         serviceName,
-        description,
+        description || null,
         category,
         durationMinutes,
-        standardCost,
-        secondaryCost,
-        insuranceCost,
+        vat || "No",
+        vatValueToUse,
+        finalStandardCost,
+        secondaryCost || null,
+        insuranceCost || null
       ];
 
-      pool.query(insertQuery, insertValue, (err2, result) => {
-        if (err2) {
+      pool.query(insertQuery, values, (insertErr, result) => {
+        if (insertErr) {
           return res.status(500).json({
             success: false,
             message: "Database insert error",
-            error: err2.message,
+            error: insertErr.message,
           });
         }
 
         return res.status(201).json({
           success: true,
           message: "Service inserted successfully",
-          id: result.insertId,
-          serviceCode: serviceId,
+          data: {
+            id: result.insertId,
+            serviceCode,
+            standardCost: finalStandardCost,
+            vat_value: vatValueToUse,
+            vat
+          }
         });
       });
     });
   } catch (error) {
     return res.status(500).json({
       success: false,
-      message: "Internal Server Error",
+      message: "Internal server error",
       error: error.message,
     });
   }
@@ -10577,6 +10665,388 @@ function deletePaymentMethod(req, res) {
   });
 }
 
+const createInsuranceCompany = (req, res) => {
+  const { company_name, address, phone_number, email, website } = req.body;
+  const company_logo = req.file ? req.file.filename : null; // multer will handle upload
+
+  // --- Validation ---
+  if (!company_name || company_name.trim() === "") {
+    return res.status(400).json({ success: false, message: "Company name is required" });
+  }
+  if (!address || address.trim() === "") {
+    return res.status(400).json({ success: false, message: "Address is required" });
+  }
+  if (!phone_number || phone_number.trim() === "") {
+    return res.status(400).json({ success: false, message: "Phone number is required" });
+  }
+  if (!email || email.trim() === "") {
+    return res.status(400).json({ success: false, message: "Email is required" });
+  }
+
+  const emailRegex = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
+  if (!emailRegex.test(email)) {
+    return res.status(400).json({ success: false, message: "Invalid email format" });
+  }
+
+  // if (website && !/^https?:\/\/[^\s$.?#].[^\s]*$/.test(website)) {
+  //   return res.status(400).json({ success: false, message: "Invalid website URL" });
+  // }
+
+  // --- Existence Check ---
+  const checkSql = "SELECT * FROM insurance_companies WHERE company_name = ? OR email = ?";
+  pool.query(checkSql, [company_name, email], (err, results) => {
+    if (err) {
+      return res.status(500).json({ success: false, message: "DB error", error: err.message });
+    }
+    if (results.length > 0) {
+      return res.status(409).json({ success: false, message: "Company with this name or email already exists" });
+    }
+
+    // --- Insert ---
+    const sql = `
+      INSERT INTO insurance_companies 
+      (company_name, address, phone_number, email, website, company_logo)
+      VALUES (?, ?, ?, ?, ?, ?)
+    `;
+    pool.query(sql, [company_name, address, phone_number, email, website || null, company_logo], (err, result) => {
+      if (err) {
+        return res.status(500).json({ success: false, message: "DB error", error: err.message });
+      }
+      return res.status(201).json({ success: true, message: "Insurance company created successfully", id: result.insertId });
+    });
+  });
+};
+
+// Get All Companies
+const getAllInsuranceCompanies = (req, res) => {
+  const sql = "SELECT * FROM insurance_companies ORDER BY updated_at DESC";
+  pool.query(sql, (err, results) => {
+    if (err) {
+      return res.status(500).json({ success: false, message: "DB error", error: err.message });
+    }
+    return res.status(200).json({ success: true, data: results });
+  });
+};
+
+// Get Company by ID
+const getInsuranceCompanyById = (req, res) => {
+  const { id } = req.params;
+  if (!id || isNaN(id)) {
+    return res.status(400).json({ success: false, message: "Valid ID is required" });
+  }
+
+  const sql = "SELECT * FROM insurance_companies WHERE company_id = ?";
+  pool.query(sql, [id], (err, results) => {
+    if (err) {
+      return res.status(500).json({ success: false, message: "DB error", error: err.message });
+    }
+    if (results.length === 0) {
+      return res.status(404).json({ success: false, message: "Company not found" });
+    }
+    return res.status(200).json({ success: true, data: results[0] });
+  });
+};
+
+// Update Company
+const updateInsuranceCompany = (req, res) => {
+  const { id } = req.params;
+  const { company_name, address, phone_number, email, website } = req.body;
+  const company_logo = req.file ? req.file.filename : null;
+
+  if (!id || isNaN(id)) {
+    return res.status(400).json({ success: false, message: "Valid ID is required" });
+  }
+
+  // Step 1: Fetch existing data
+  const getCompanySql = "SELECT * FROM insurance_companies WHERE company_id = ?";
+  pool.query(getCompanySql, [id], (err, existingResults) => {
+    if (err) {
+      return res.status(500).json({ success: false, message: "DB error", error: err.message });
+    }
+    if (existingResults.length === 0) {
+      return res.status(404).json({ success: false, message: "Company not found" });
+    }
+
+    const existingData = existingResults[0];
+
+    // Step 2: Merge new data with existing data
+    const updatedCompanyName = company_name || existingData.company_name;
+    const updatedAddress = address || existingData.address;
+    const updatedPhoneNumber = phone_number || existingData.phone_number;
+    const updatedEmail = email || existingData.email;
+    const updatedWebsite = website || existingData.website;
+    const updatedLogo = company_logo || existingData.company_logo;
+
+    // Step 3: Validation
+    const emailRegex = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
+    if (!emailRegex.test(updatedEmail)) {
+      return res.status(400).json({ success: false, message: "Invalid email format" });
+    }
+
+  
+
+    // Step 4: Check duplicates (excluding current record)
+    const checkSql = "SELECT * FROM insurance_companies WHERE (company_name = ? OR email = ?) AND company_id != ?";
+    pool.query(checkSql, [updatedCompanyName, updatedEmail, id], (err, results) => {
+      if (err) {
+        return res.status(500).json({ success: false, message: "DB error", error: err.message });
+      }
+      if (results.length > 0) {
+        return res.status(409).json({ success: false, message: "Another company with this name or email already exists" });
+      }
+
+      // Step 5: Final update
+      const updateSql = `
+        UPDATE insurance_companies 
+        SET company_name=?, address=?, phone_number=?, email=?, website=?, company_logo=? 
+        WHERE company_id=?
+      `;
+
+      pool.query(
+        updateSql,
+        [updatedCompanyName, updatedAddress, updatedPhoneNumber, updatedEmail, updatedWebsite, updatedLogo, id],
+        (err, result) => {
+          if (err) {
+            return res.status(500).json({ success: false, message: "DB error", error: err.message });
+          }
+          return res.status(200).json({ success: true, message: "Insurance company updated successfully" });
+        }
+      );
+    });
+  });
+};
+
+
+// Delete Company
+const deleteInsuranceCompany = (req, res) => {
+  const { id } = req.params;
+  if (!id || isNaN(id)) {
+    return res.status(400).json({ success: false, message: "Valid ID is required" });
+  }
+
+  const sql = "DELETE FROM insurance_companies WHERE company_id = ?";
+  pool.query(sql, [id], (err, result) => {
+    if (err) {
+      return res.status(500).json({ success: false, message: "DB error", error: err.message });
+    }
+    if (result.affectedRows === 0) {
+      return res.status(404).json({ success: false, message: "Company not found" });
+    }
+    return res.status(200).json({ success: true, message: "Insurance company deleted successfully" });
+  });
+};
+
+// const createCurrency = (req, res) => {
+//   const { code, name, phone, currency_symbol, capital, currency } = req.body;
+
+//   // Validation
+//   if (!code || !name || !phone) {
+//     return res.status(400).json({ success: false, message: "code, name, and phone are required" });
+//   }
+
+//   const checkSql = "SELECT * FROM currencies WHERE code = ?";
+//   pool.query(checkSql, [code], (err, results) => {
+//     if (err) return res.status(500).json({ success: false, message: "DB error", error: err.message });
+
+//     if (results.length > 0) {
+//       return res.status(409).json({ success: false, message: "Currency with this code already exists" });
+//     }
+
+//     const insertSql = `
+//       INSERT INTO currencies (code, name, phone, currency_symbol, capital, currency)
+//       VALUES (?, ?, ?, ?, ?, ?)
+//     `;
+//     pool.query(insertSql, [code, name, phone, currency_symbol || null, capital || null, currency || null], (err, result) => {
+//       if (err) return res.status(500).json({ success: false, message: "DB error", error: err.message });
+
+//       return res.status(201).json({ success: true, message: "Currency created successfully", id: result.insertId });
+//     });
+//   });
+// };
+
+//  Get All Currencies
+
+const getAllCurrencies = (req, res) => {
+  const sql = "SELECT * FROM currencies";
+  pool.query(sql, (err, results) => {
+    if (err) return res.status(500).json({ success: false, message: "DB error", error: err.message });
+    if(results.length===0) { 
+      return res.status(200).json({
+        success : true,
+        data : []
+      })
+    }
+
+    return res.status(200).json({ success: true, data: results.map((currency)=>({
+      currency : currency.currency,
+      currency_symbol : currency.currency_symbol
+    })) });
+  });
+};
+
+// Get Currency by ID
+const getCurrencyById = (req, res) => {
+  const { id } = req.params;
+  if (!id || isNaN(id)) {
+    return res.status(400).json({ success: false, message: "Valid ID is required" });
+  }
+
+  const sql = "SELECT * FROM currencies WHERE id = ?";
+  pool.query(sql, [id], (err, results) => {
+    if (err) return res.status(500).json({ success: false, message: "DB error", error: err.message });
+
+    if (results.length === 0) {
+      return res.status(404).json({ success: false, message: "Currency not found" });
+    }
+
+    return res.status(200).json({ success: true, data: {
+      currency : results[0].currency,
+      currency_symbol : results[0].currency_symbol
+    }
+     });
+  });
+};
+
+// Update Currency (smart merge if field not provided)
+// const updateCurrency = (req, res) => {
+//   const { id } = req.params;
+//   const { code, name, phone, currency_symbol, capital, currency } = req.body;
+
+//   if (!id || isNaN(id)) {
+//     return res.status(400).json({ success: false, message: "Valid ID is required" });
+//   }
+
+//   // Step 1: Get existing currency
+//   const getSql = "SELECT * FROM currencies WHERE id = ?";
+//   pool.query(getSql, [id], (err, existingResults) => {
+//     if (err) return res.status(500).json({ success: false, message: "DB error", error: err.message });
+
+//     if (existingResults.length === 0) {
+//       return res.status(404).json({ success: false, message: "Currency not found" });
+//     }
+
+//     const existing = existingResults[0];
+
+//     // Step 2: Use provided value or fallback to existing
+//     const updatedCode = code || existing.code;
+//     const updatedName = name || existing.name;
+//     const updatedPhone = phone || existing.phone;
+//     const updatedSymbol = currency_symbol || existing.currency_symbol;
+//     const updatedCapital = capital || existing.capital;
+//     const updatedCurrency = currency || existing.currency;
+
+//     // Step 3: Check duplicate code (excluding current)
+//     const checkSql = "SELECT * FROM currencies WHERE code = ? AND id != ?";
+//     pool.query(checkSql, [updatedCode, id], (err, results) => {
+//       if (err) return res.status(500).json({ success: false, message: "DB error", error: err.message });
+
+//       if (results.length > 0) {
+//         return res.status(409).json({ success: false, message: "Currency code already exists" });
+//       }
+
+//       // Step 4: Update
+//       const updateSql = `
+//         UPDATE currencies
+//         SET code = ?, name = ?, phone = ?, currency_symbol = ?, capital = ?, currency = ?
+//         WHERE id = ?
+//       `;
+//       pool.query(updateSql, [updatedCode, updatedName, updatedPhone, updatedSymbol, updatedCapital, updatedCurrency, id], (err, result) => {
+//         if (err) return res.status(500).json({ success: false, message: "DB error", error: err.message });
+
+//         return res.status(200).json({ success: true, message: "Currency updated successfully" });
+//       });
+//     });
+//   });
+// };
+
+//  Delete Currency
+const deleteCurrency = (req, res) => {
+  const { id } = req.params;
+
+  if (!id || isNaN(id)) {
+    return res.status(400).json({ success: false, message: "Valid ID is required" });
+  }
+
+  const sql = "DELETE FROM currencies WHERE id = ?";
+  pool.query(sql, [id], (err, result) => {
+    if (err) return res.status(500).json({ success: false, message: "DB error", error: err.message });
+
+    if (result.affectedRows === 0) {
+      return res.status(404).json({ success: false, message: "Currency not found" });
+    }
+
+    return res.status(200).json({ success: true, message: "Currency deleted successfully" });
+  });
+};
+
+const getAllDiscount = (req, res) => {
+  const sql = "SELECT * FROM discounts ";
+  pool.query(sql, (err, results) => {
+    if (err) return res.status(500).json({ success: false, message: "DB error", error: err.message });
+
+    return res.status(200).json({ success: true, data: results });
+  });
+};
+
+
+//  Update Discount
+const updateDiscount = (req, res) => {
+  const { id } = req.params;
+  const { discount_value } = req.body;
+
+  if (!id || isNaN(id)) {
+    return res.status(400).json({ success: false, message: "Valid ID is required" });
+  }
+
+  if (discount_value === undefined || isNaN(discount_value)) {
+    return res.status(400).json({ success: false, message: "Valid discount_value is required" });
+  }
+
+  const sql = "UPDATE discounts SET discount_value = ? WHERE id = ?";
+  pool.query(sql, [discount_value, id], (err, result) => {
+    if (err) return res.status(500).json({ success: false, message: "DB error", error: err.message });
+
+    if (result.affectedRows === 0) {
+      return res.status(404).json({ success: false, message: "Discount not found" });
+    }
+
+    return res.status(200).json({ success: true, message: "Discount updated" });
+  });
+};
+
+const getAllVat = (req, res) => {
+  const sql = "SELECT * FROM vat";
+  pool.query(sql, (err, results) => {
+    if (err) return res.status(500).json({ success: false, message: "DB error", error: err.message });
+
+    return res.status(200).json({ success: true, data: results });
+  });
+};
+
+const updateVat = (req, res) => {
+  const { id } = req.params;
+  const { vat_value } = req.body;
+
+  if (!id || isNaN(id)) {
+    return res.status(400).json({ success: false, message: "Valid ID is required" });
+  }
+
+  if (vat_value === undefined || isNaN(vat_value)) {
+    return res.status(400).json({ success: false, message: "Valid vat_value is required" });
+  }
+
+  const sql = "UPDATE vat SET vat_value = ? WHERE id = ?";
+  pool.query(sql, [vat_value, id], (err, result) => {
+    if (err) return res.status(500).json({ success: false, message: "DB error", error: err.message });
+
+    if (result.affectedRows === 0) {
+      return res.status(404).json({ success: false, message: "Vat not found" });
+    }
+
+    return res.status(200).json({ success: true, message: "vat updated" });
+  });
+};
+
 export default {
   
   // users apis 
@@ -10781,6 +11251,24 @@ export default {
   getAllPaymentMethods,
   getPaymentMethodById,
   updatePaymentMethod,
-  deletePaymentMethod
+  deletePaymentMethod, 
+
+  createInsuranceCompany,   
+  getAllInsuranceCompanies,
+  getInsuranceCompanyById,
+  updateInsuranceCompany,
+  deleteInsuranceCompany,
+
+  // createCurrency,
+  getAllCurrencies,
+  getCurrencyById,
+  // updateCurrency,
+  deleteCurrency,
+
+  getAllDiscount,
+  updateDiscount,
+
+  getAllVat,
+  updateVat
 };
 

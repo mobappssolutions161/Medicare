@@ -205,4 +205,22 @@ router.get('/getPaymentMethodById/:id', adminController.getPaymentMethodById);
 router.put('/updatePaymentMethod/:id', adminController.updatePaymentMethod);
 router.delete('/deletePaymentMethod/:id', adminController.deletePaymentMethod);
 
+router.post('/createInsuranceCompany',upload.single("company_logo"), adminController.createInsuranceCompany);
+router.get('/getAllInsuranceCompanies', adminController.getAllInsuranceCompanies);
+router.get('/getInsuranceCompanyById/:id', adminController.getInsuranceCompanyById);
+router.put('/updateInsuranceCompany/:id',upload.single("company_logo"),adminController.updateInsuranceCompany);
+router.delete('/deleteInsuranceCompany/:id', adminController.deleteInsuranceCompany);
+
+// router.post('/createPaymentMethod', adminController.createPaymentMethod);
+router.get('/getAllCurrencies', adminController.getAllCurrencies);
+router.get('/getCurrencyById/:id', adminController.getCurrencyById);
+// router.put('/updatePaymentMethod/:id', adminController.updatePaymentMethod);
+router.delete('/deleteCurrency/:id', adminController.deleteCurrency);
+
+router.get('/getAllDiscount', adminController.getAllDiscount);
+router.put('/updateDiscount/:id', adminController.updateDiscount);
+
+router.get('/getAllVat', adminController.getAllVat);
+router.put('/updateVat/:id', adminController.updateVat);
+
 export default router;
