@@ -1,5 +1,3 @@
-
-// import { log } from "winston";
 import pool from "../config/db.js";
 // import bcrypt from "bcrypt";
 
@@ -5323,7 +5321,7 @@ const addServices = async (req, res) => {
         description || null,
         category,
         durationMinutes,
-        vat || "No",
+        vat,
         vatValueToUse,
         finalStandardCost,
         secondaryCost || null,
@@ -5376,7 +5374,9 @@ const getServices = async (req, res) => {
         s.durationMinutes AS duration,
         s.standardCost AS standard_price,
         s.secondaryCost AS secondary_price,
-        s.insuranceCost AS insurance_price
+        s.insuranceCost AS insurance_price,
+        s.vat,
+        s.vat_value
 
       FROM 
         services s
@@ -9312,7 +9312,6 @@ const getPrescriptionById = async (req, res) => {
     `;
 
     pool.query(sql, [prescriptionId], (err, results) => {
-      console.log(results);
       
       if (err) {
         return res.status(500).json({
@@ -10836,149 +10835,6 @@ const deleteInsuranceCompany = (req, res) => {
   });
 };
 
-// const createCurrency = (req, res) => {
-//   const { code, name, phone, currency_symbol, capital, currency } = req.body;
-
-//   // Validation
-//   if (!code || !name || !phone) {
-//     return res.status(400).json({ success: false, message: "code, name, and phone are required" });
-//   }
-
-//   const checkSql = "SELECT * FROM currencies WHERE code = ?";
-//   pool.query(checkSql, [code], (err, results) => {
-//     if (err) return res.status(500).json({ success: false, message: "DB error", error: err.message });
-
-//     if (results.length > 0) {
-//       return res.status(409).json({ success: false, message: "Currency with this code already exists" });
-//     }
-
-//     const insertSql = `
-//       INSERT INTO currencies (code, name, phone, currency_symbol, capital, currency)
-//       VALUES (?, ?, ?, ?, ?, ?)
-//     `;
-//     pool.query(insertSql, [code, name, phone, currency_symbol || null, capital || null, currency || null], (err, result) => {
-//       if (err) return res.status(500).json({ success: false, message: "DB error", error: err.message });
-
-//       return res.status(201).json({ success: true, message: "Currency created successfully", id: result.insertId });
-//     });
-//   });
-// };
-
-//  Get All Currencies
-
-const getAllCurrencies = (req, res) => {
-  const sql = "SELECT * FROM currencies";
-  pool.query(sql, (err, results) => {
-    if (err) return res.status(500).json({ success: false, message: "DB error", error: err.message });
-    if(results.length===0) { 
-      return res.status(200).json({
-        success : true,
-        data : []
-      })
-    }
-
-    return res.status(200).json({ success: true, data: results.map((currency)=>({
-      currency : currency.currency,
-      currency_symbol : currency.currency_symbol
-    })) });
-  });
-};
-
-// Get Currency by ID
-const getCurrencyById = (req, res) => {
-  const { id } = req.params;
-  if (!id || isNaN(id)) {
-    return res.status(400).json({ success: false, message: "Valid ID is required" });
-  }
-
-  const sql = "SELECT * FROM currencies WHERE id = ?";
-  pool.query(sql, [id], (err, results) => {
-    if (err) return res.status(500).json({ success: false, message: "DB error", error: err.message });
-
-    if (results.length === 0) {
-      return res.status(404).json({ success: false, message: "Currency not found" });
-    }
-
-    return res.status(200).json({ success: true, data: {
-      currency : results[0].currency,
-      currency_symbol : results[0].currency_symbol
-    }
-     });
-  });
-};
-
-// Update Currency (smart merge if field not provided)
-// const updateCurrency = (req, res) => {
-//   const { id } = req.params;
-//   const { code, name, phone, currency_symbol, capital, currency } = req.body;
-
-//   if (!id || isNaN(id)) {
-//     return res.status(400).json({ success: false, message: "Valid ID is required" });
-//   }
-
-//   // Step 1: Get existing currency
-//   const getSql = "SELECT * FROM currencies WHERE id = ?";
-//   pool.query(getSql, [id], (err, existingResults) => {
-//     if (err) return res.status(500).json({ success: false, message: "DB error", error: err.message });
-
-//     if (existingResults.length === 0) {
-//       return res.status(404).json({ success: false, message: "Currency not found" });
-//     }
-
-//     const existing = existingResults[0];
-
-//     // Step 2: Use provided value or fallback to existing
-//     const updatedCode = code || existing.code;
-//     const updatedName = name || existing.name;
-//     const updatedPhone = phone || existing.phone;
-//     const updatedSymbol = currency_symbol || existing.currency_symbol;
-//     const updatedCapital = capital || existing.capital;
-//     const updatedCurrency = currency || existing.currency;
-
-//     // Step 3: Check duplicate code (excluding current)
-//     const checkSql = "SELECT * FROM currencies WHERE code = ? AND id != ?";
-//     pool.query(checkSql, [updatedCode, id], (err, results) => {
-//       if (err) return res.status(500).json({ success: false, message: "DB error", error: err.message });
-
-//       if (results.length > 0) {
-//         return res.status(409).json({ success: false, message: "Currency code already exists" });
-//       }
-
-//       // Step 4: Update
-//       const updateSql = `
-//         UPDATE currencies
-//         SET code = ?, name = ?, phone = ?, currency_symbol = ?, capital = ?, currency = ?
-//         WHERE id = ?
-//       `;
-//       pool.query(updateSql, [updatedCode, updatedName, updatedPhone, updatedSymbol, updatedCapital, updatedCurrency, id], (err, result) => {
-//         if (err) return res.status(500).json({ success: false, message: "DB error", error: err.message });
-
-//         return res.status(200).json({ success: true, message: "Currency updated successfully" });
-//       });
-//     });
-//   });
-// };
-
-//  Delete Currency
-const deleteCurrency = (req, res) => {
-  const { id } = req.params;
-
-  if (!id || isNaN(id)) {
-    return res.status(400).json({ success: false, message: "Valid ID is required" });
-  }
-
-  const sql = "DELETE FROM currencies WHERE id = ?";
-  pool.query(sql, [id], (err, result) => {
-    if (err) return res.status(500).json({ success: false, message: "DB error", error: err.message });
-
-    if (result.affectedRows === 0) {
-      return res.status(404).json({ success: false, message: "Currency not found" });
-    }
-
-    return res.status(200).json({ success: true, message: "Currency deleted successfully" });
-  });
-};
-
 const getAllDiscount = (req, res) => {
   const sql = "SELECT * FROM discounts ";
   pool.query(sql, (err, results) => {
@@ -11258,12 +11114,6 @@ export default {
   getInsuranceCompanyById,
   updateInsuranceCompany,
   deleteInsuranceCompany,
-
-  // createCurrency,
-  getAllCurrencies,
-  getCurrencyById,
-  // updateCurrency,
-  deleteCurrency,
 
   getAllDiscount,
   updateDiscount,
