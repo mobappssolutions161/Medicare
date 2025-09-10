@@ -211,8 +211,17 @@ router.get('/getInsuranceCompanyById/:id', adminController.getInsuranceCompanyBy
 router.put('/updateInsuranceCompany/:id',upload.single("company_logo"),adminController.updateInsuranceCompany);
 router.delete('/deleteInsuranceCompany/:id', adminController.deleteInsuranceCompany);
 
+router.post('/addInsuranceCard',upload.single("scanned_copy"), adminController.addInsuranceCard);
+router.get('/getAllInsuranceCards', adminController.getAllInsuranceCards);
+router.put('/editInsuranceCard/:card_id',upload.single("scanned_copy"),adminController.editInsuranceCard);
+router.delete('/deleteInsuranceCard/:id', adminController.deleteInsuranceCard);
+
+
 router.get('/getAllDiscount', adminController.getAllDiscount);
 router.put('/updateDiscount/:id', adminController.updateDiscount);
+
+router.get('/getCurrency', adminController.getCurrency);
+router.put('/updateCurrency/:id', adminController.updateCurrency);
 
 router.get('/getAllVat', adminController.getAllVat);
 router.put('/updateVat/:id', adminController.updateVat);

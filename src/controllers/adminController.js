@@ -1579,6 +1579,20 @@ const GetPatientServices = async (req, res) => {
         });
       }
 
+            const currencySql = "SELECT currency FROM currencies LIMIT 1";
+
+      pool.query(currencySql, (err2, currencyResult) => {
+        if (err2) {
+          return res.status(500).json({
+            success: false,
+            message: "Database error while fetching currency",
+            error: err2.message,
+          });
+        }
+
+        const currency =
+          currencyResult.length > 0 ? currencyResult[0].currency : "BHD";
+
       // Calculate totals
       let planTotal = 0;
       let completedTotal = 0;
@@ -1605,9 +1619,11 @@ const GetPatientServices = async (req, res) => {
           planTotal,
           completedTotal,
           totalSum,
+          currency,
           results
         }
       });
+    })
     });
   } catch (error) {
     return res.status(500).json({
@@ -2043,10 +2059,27 @@ const getPharmacyByPatientId = async (req, res) => {
         });
       }
 
+      const currencySql = "SELECT currency FROM currencies LIMIT 1";
+
+      pool.query(currencySql, (err2, currencyResult) => {
+        if (err2) {
+          return res.status(500).json({
+            success: false,
+            message: "Database error while fetching currency",
+            error: err2.message,
+          });
+        }
+
+        const currency =
+          currencyResult.length > 0 ? currencyResult[0].currency : "BHD";
       return res.status(200).json({
         success: true,
         message : "Patient pharmacy retrieved successfully",
-        data: results
+        data: {
+          results,
+          currency
+        }
+      })
       });
     });
 
@@ -10835,6 +10868,229 @@ const deleteInsuranceCompany = (req, res) => {
   });
 };
 
+const addInsuranceCard = (req, res) => {
+  try {
+    let {
+      company_id,
+      patient_id,
+      policy_number,
+      issue_date,
+      expiry_date,
+      co_insurance_percent,
+      deductible_amount,
+    } = req.body;
+
+    co_insurance_percent =  parseFloat(co_insurance_percent)
+
+    
+    if (!company_id) {
+      return res.status(400).json({ success: false, message: "Company ID is required" });
+    }
+
+    if (!patient_id) {
+      return res.status(400).json({ success: false, message: "Patient ID is required" });
+    }
+
+    if (!policy_number) {
+      return res.status(400).json({ success: false, message: "Policy number is required" });
+    }
+
+    if (!issue_date || issue_date > expiry_date) {
+      return res.status(400).json({ success: false, message: "Issue date is required and issue date is not greater than expiry date" });
+    }
+
+    if (!expiry_date) {
+      return res.status(400).json({ success: false, message: "Expiry date is required" });
+    }
+
+    if (isNaN(co_insurance_percent)) {
+      return res.status(400).json({ success: false, message: "Co-insurance percent must be a number" });
+    }
+
+    if (co_insurance_percent < 0 || co_insurance_percent > 100) {
+      return res.status(400).json({ success: false, message: "Co-insurance percent must be between 0 and 100" });
+    }
+
+    if (deductible_amount && isNaN(parseFloat(deductible_amount))) {
+      return res.status(400).json({ success: false, message: "Deductible amount must be a valid number" });
+    }
+
+    const co_insurance_patient_percent = 100 - co_insurance_percent
+
+    const today = new Date().toISOString().split("T")[0];
+    const status = expiry_date < today ? "expired" : "active";
+    const scanned_copy = req.file ? req.file.filename : null;
+
+      const sql = `
+    INSERT INTO insurance_cards 
+    (company_id, patient_id, policy_number, issue_date, expiry_date, co_insurance_percent, co_insurance_patient_percent,deductible_amount, scanned_copy,status) 
+    VALUES (?, ?, ?,?, ?, ?, ?, ?,?, ?)
+  `;
+
+    pool.query(sql, [
+    company_id,
+    patient_id,
+    policy_number,
+    issue_date,
+    expiry_date,
+    co_insurance_percent,
+    co_insurance_patient_percent,
+    deductible_amount || 0,
+    scanned_copy,
+    status
+    ], (err, result) => {
+      if (err) {
+        if (err.code === "ER_DUP_ENTRY") {
+          return res.status(400).json({ success: false, message: "Policy number already exists." });
+        }
+        return res.status(500).json({ success: false, message: "DB error", error: err.message });
+      }
+
+      res.status(201).json({ success: true, message: "Card created", card_id: result.insertId });
+    });
+  } catch (error) {
+    res.status(500).json({ success: false, message: "Something went wrong", error: error.message });
+  }
+};
+
+const getAllInsuranceCards = (req, res) => {
+  const sql = `
+    SELECT *,
+    CASE
+      WHEN expiry_date < CURDATE() THEN 'expired'
+      ELSE 'active'
+    END AS status
+    FROM insurance_cards
+    WHERE is_deleted = 0
+    ORDER BY updated_at DESC
+  `;
+
+  pool.query(sql, (err, results) => {
+    if (err) {
+      return res.status(500).json({
+        success: false,
+        message: "Database query failed",
+        error: err.message,
+      });
+    }
+
+    res.status(200).json({
+      success: true,
+      data: results,
+    });
+  });
+};
+
+const editInsuranceCard = (req, res) => {
+  try {
+    const { card_id } = req.params;
+    if (!card_id) {
+      return res.status(400).json({ success: false, message: "Card ID is required" });
+    }
+
+    const {
+      issue_date,
+      expiry_date,
+      co_insurance_percent,
+      deductible_amount,
+    } = req.body;
+
+    // ====== Fetch existing card ======
+    const fetchSql = "SELECT * FROM insurance_cards WHERE card_id = ?";
+    pool.query(fetchSql, [card_id], (err, results) => {
+      if (err) {
+        return res.status(500).json({ success: false, message: "DB error", error: err.message });
+      }
+
+      if (results.length === 0) {
+        return res.status(404).json({ success: false, message: "Insurance card not found" });
+      }
+
+      const card = results[0]; // Existing data
+
+      // ====== VALIDATIONS ======
+      let newIssueDate = issue_date || card.issue_date;
+      let newExpiryDate = expiry_date || card.expiry_date;
+      let newCoInsurancePercent = co_insurance_percent !== undefined ? parseFloat(co_insurance_percent) : card.co_insurance_percent;
+      let newDeductibleAmount = deductible_amount !== undefined ? parseFloat(deductible_amount) : card.deductible_amount;
+
+      if (isNaN(newCoInsurancePercent) || newCoInsurancePercent < 0 || newCoInsurancePercent > 100) {
+        return res.status(400).json({ success: false, message: "Co-insurance percent must be a number between 0 and 100" });
+      }
+
+      if (deductible_amount !== undefined && isNaN(newDeductibleAmount)) {
+        return res.status(400).json({ success: false, message: "Deductible amount must be a valid number" });
+      }
+
+      if (newExpiryDate && newIssueDate && new Date(newExpiryDate) < new Date(newIssueDate)) {
+        return res.status(400).json({ success: false, message: "Expiry date cannot be before issue date" });
+      }
+
+      // ====== BUSINESS LOGIC ======
+      const newCoInsurancePatientPercent = 100 - newCoInsurancePercent;
+      const newStatus = new Date(newExpiryDate) < new Date() ? "expired" : "active";
+      const scanned_copy = req.file ? req.file.filename : card.scanned_copy; // keep old if not uploaded
+
+      // ====== Build dynamic SQL ======
+      const fields = [];
+      const values = [];
+
+      if (issue_date) { fields.push("issue_date = ?"); values.push(newIssueDate); }
+      if (expiry_date) { fields.push("expiry_date = ?"); values.push(newExpiryDate); }
+      if (co_insurance_percent !== undefined) { 
+        fields.push("co_insurance_percent = ?", "co_insurance_patient_percent = ?"); 
+        values.push(newCoInsurancePercent, newCoInsurancePatientPercent); 
+      }
+      if (deductible_amount !== undefined) { fields.push("deductible_amount = ?"); values.push(newDeductibleAmount); }
+      fields.push("status = ?"); values.push(newStatus);
+      if (req.file) { fields.push("scanned_copy = ?"); values.push(scanned_copy); }
+
+      values.push(card_id); // WHERE clause
+
+      const sql = `UPDATE insurance_cards SET ${fields.join(", ")} WHERE card_id = ?`;
+
+      pool.query(sql, values, (err, result) => {
+        if (err) {
+          return res.status(500).json({ success: false, message: "DB error", error: err.message });
+        }
+
+        return res.status(200).json({ success: true, message: "Insurance card updated successfully" });
+      });
+    });
+
+  } catch (error) {
+    return res.status(500).json({ success: false, message: "Something went wrong", error: error.message });
+  }
+};
+
+const deleteInsuranceCard = (req, res) => {
+  const { id } = req.params;
+
+  const sql = `UPDATE insurance_cards SET is_deleted = 1 WHERE card_id = ?`;
+
+  pool.query(sql, [id], (err, result) => {
+    if (err) {
+      return res.status(500).json({
+        success: false,
+        message: "DB error",
+        error: err.message,
+      });
+    }
+
+    if (result.affectedRows === 0) {
+      return res.status(404).json({
+        success: false,
+        message: "Insurance card not found.",
+      });
+    }
+
+    res.status(200).json({
+      success: true,
+      message: "Insurance card deleted successfully (soft delete).",
+    });
+  });
+};
+
 const getAllDiscount = (req, res) => {
   const sql = "SELECT * FROM discounts ";
   pool.query(sql, (err, results) => {
@@ -10844,6 +11100,38 @@ const getAllDiscount = (req, res) => {
   });
 };
 
+const getCurrency = (req, res) => {
+  const sql = "SELECT * FROM currencies";
+  pool.query(sql, (err, results) => {
+    if (err) return res.status(500).json({ success: false, message: "DB error", error: err.message });
+
+    return res.status(200).json({ success: true, data: results });
+  });
+};
+
+const updateCurrency = (req, res) => {
+  const { id } = req.params;
+  const { currency } = req.body;
+
+  if (!id || isNaN(id)) {
+    return res.status(400).json({ success: false, message: "id is required" });
+  }
+
+  if (currency === undefined || !currency) {
+    return res.status(400).json({ success: false, message: "currency is required" });
+  }
+
+  const sql = "UPDATE currencies SET currency = ? WHERE id = ?";
+  pool.query(sql, [currency, id], (err, result) => {
+    if (err) return res.status(500).json({ success: false, message: "DB error", error: err.message });
+
+    if (result.affectedRows === 0) {
+      return res.status(404).json({ success: false, message: "Vat not found" });
+    }
+
+    return res.status(200).json({ success: true, message: "vat updated" });
+  });
+};
 
 //  Update Discount
 const updateDiscount = (req, res) => {
@@ -11115,8 +11403,16 @@ export default {
   updateInsuranceCompany,
   deleteInsuranceCompany,
 
+  addInsuranceCard,
+  getAllInsuranceCards,
+  editInsuranceCard,
+  deleteInsuranceCard,
+
   getAllDiscount,
   updateDiscount,
+
+  getCurrency,
+  updateCurrency,
 
   getAllVat,
   updateVat
