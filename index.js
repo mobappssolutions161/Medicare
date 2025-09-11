@@ -3,7 +3,7 @@ import dotenv from "dotenv"
 import cors from "cors"
 import pool from "./src/config/db.js"
 import logger from "./src/utils/logger.js"
-
+import "./src/cron/updateInsuranceStatus.js"
 const app = express()
 dotenv.config()
 

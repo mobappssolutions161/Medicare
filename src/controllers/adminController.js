@@ -10955,12 +10955,12 @@ const addInsuranceCard = (req, res) => {
 
 const getAllInsuranceCards = (req, res) => {
   const sql = `
-    SELECT *,
-    CASE
-      WHEN expiry_date < CURDATE() THEN 'expired'
-      ELSE 'active'
-    END AS status
-    FROM insurance_cards
+    SELECT ic.*,
+    p.firstName, p.middleName, p.lastName,
+    icom.company_name
+    FROM insurance_cards ic
+    LEFT JOIN insurance_companies icom ON ic.company_id = icom.company_id
+    LEFT JOIN patients p ON ic.patient_id = p.id
     WHERE is_deleted = 0
     ORDER BY updated_at DESC
   `;
@@ -10973,10 +10973,25 @@ const getAllInsuranceCards = (req, res) => {
         error: err.message,
       });
     }
+     // 🔹 Format data with patient_name
+    const formattedResults = results.map(row => {
+      const nameParts = [
+        row.firstName || "",
+        row.middleName || "",
+        row.lastName || ""
+      ];
+      const patient_name = nameParts.filter(Boolean).join(" ");
+      const { firstName, middleName, lastName, ...rest } = row;
 
-    res.status(200).json({
+      return {
+        ...rest,
+        patient_name
+      }
+    })
+
+    return res.status(200).json({
       success: true,
-      data: results,
+      data: formattedResults,
     });
   });
 };
