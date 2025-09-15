@@ -1379,7 +1379,6 @@ const AddPatientServices = async (req, res) => {
   try {
     const { patientId, serviceId, discount_type, discount_value, extra_notes } = req.body;
 
-    // Step 1: Validate required fields
     if (!patientId || !serviceId) {
       return res.status(400).json({
         success: false,
@@ -1387,12 +1386,10 @@ const AddPatientServices = async (req, res) => {
       });
     }
 
-    // Step 2: Get global discount
+    // Step 1: Get global discount
     const discountQuery = `SELECT discount_value FROM discounts LIMIT 1`;
-    
+
     pool.query(discountQuery, (discErr, discResult) => {
-      console.log(discResult);
-      
       if (discErr) {
         return res.status(500).json({
           success: false,
@@ -1410,119 +1407,138 @@ const AddPatientServices = async (req, res) => {
 
       const globalDiscount = discResult[0].discount_value;
 
-      // Step 3: Get service cost
-      const serviceQuery = `SELECT standardCost FROM services WHERE id = ?`;
+      // Step 2: Check if patient has active insurance card (not claimed)
+      const insuranceQuery = `
+        SELECT * FROM insurance_cards 
+        WHERE patient_id = ? AND status = 'active' AND claimed = 'No'
+        LIMIT 1
+      `;
 
-      pool.query(serviceQuery, [serviceId], (serviceErr, serviceResult) => {
-        if (serviceErr) {
+      pool.query(insuranceQuery, [patientId], (insErr, insResult) => {
+        if (insErr) {
           return res.status(500).json({
             success: false,
-            message: "Database error while fetching service cost",
-            error: serviceErr.message,
+            message: "Database error while checking insurance card",
+            error: insErr.message,
           });
         }
 
-        if (serviceResult.length === 0) {
-          return res.status(404).json({
-            success: false,
-            message: "Service not found",
-          });
-        }
+        const hasInsurance = insResult.length > 0;
 
-        const { standardCost } = serviceResult[0];
+        // Step 3: Get service cost (choose based on insurance or not)
+        const serviceQuery = `SELECT standardCost, insuranceCost FROM services WHERE id = ?`;
 
-        // Step 4: Validate discount based on type
-        if (discount_type === "Percentage" && discount_value > globalDiscount && discount_value >= 0) {
-          return res.status(400).json({
-            success: false,
-            message: `Percentage discount cannot exceed the global limit of ${globalDiscount}`,
-          });
-        }
-
-        if (discount_type === "Amount" && discount_value > standardCost && discount_value >= 0) {
-          return res.status(400).json({
-            success: false,
-            message: `Amount discount cannot exceed the standard cost of ${standardCost}`,
-          });
-        }
-
-        // Step 5: Check for duplicate
-        const duplicateQuery = `SELECT id FROM patient_services WHERE patientId = ? AND serviceId = ?`;
-        
-
-        pool.query(duplicateQuery, [patientId, serviceId], (dupErr, dupResult) => {
-
-          console.log(dupResult)
-
-          if (dupErr) {
+        pool.query(serviceQuery, [serviceId], (serviceErr, serviceResult) => {
+          if (serviceErr) {
             return res.status(500).json({
               success: false,
-              message: "Database error while checking duplicates",
-              error: dupErr.message,
+              message: "Database error while fetching service cost",
+              error: serviceErr.message,
             });
           }
 
-          if (dupResult.length > 0) {
+          if (serviceResult.length === 0) {
+            return res.status(404).json({
+              success: false,
+              message: "Service not found",
+            });
+          }
+
+          const { standardCost, insuranceCost } = serviceResult[0];
+
+          // 👉 Insurance logic applied here
+          let baseCost = hasInsurance ? insuranceCost : standardCost;
+
+          // Step 4: Validate discount
+          if (discount_type === "Percentage" && discount_value > globalDiscount && discount_value >= 0) {
             return res.status(400).json({
               success: false,
-              message: "This service is already added for the patient",
+              message: `Percentage discount cannot exceed the global limit of ${globalDiscount}`,
             });
           }
 
-          // Step 6: Calculate net amount
-          let netAmount = standardCost;
-
-          if (discount_type === "Amount") {
-            netAmount = standardCost - discount_value;
-          } else if (discount_type === "Percentage") {
-            netAmount = standardCost - (standardCost * discount_value / 100);
+          if (discount_type === "Amount" && discount_value > baseCost && discount_value >= 0) {
+            return res.status(400).json({
+              success: false,
+              message: `Amount discount cannot exceed the service cost of ${baseCost}`,
+            });
           }
 
-          if (netAmount < 0) netAmount = 0;
+          // Step 5: Check duplicate
+          const duplicateQuery = `SELECT id FROM patient_services WHERE patientId = ? AND serviceId = ?`;
 
-          // Step 7: Insert patient service
-          const insertQuery = `
-            INSERT INTO patient_services 
-            (patientId, serviceId, amount, discount_type, discount_value, net_amount, extra_notes)
-            VALUES (?, ?, ?, ?, ?, ?, ?)
-          `;
-
-          pool.query(
-            insertQuery,
-            [
-              patientId,
-              serviceId,
-              standardCost,
-              discount_type || null,
-              discount_value || 0,
-              netAmount,
-              extra_notes || null,
-            ],
-            (insertErr, result) => {
-              if (insertErr) {
-                return res.status(500).json({
-                  success: false,
-                  message: "Database error while inserting patient service",
-                  error: insertErr.message,
-                });
-              }
-
-              return res.status(201).json({
-                success: true,
-                message: "Patient service created successfully",
-                data: {
-                  id: result.insertId,
-                  patientId,
-                  serviceId,
-                  standardCost,
-                  discount_type,
-                  discount_value,
-                  netAmount,
-                  extra_notes,
-                },
+          pool.query(duplicateQuery, [patientId, serviceId], (dupErr, dupResult) => {
+            if (dupErr) {
+              return res.status(500).json({
+                success: false,
+                message: "Database error while checking duplicates",
+                error: dupErr.message,
               });
             }
-          );
+
+            if (dupResult.length > 0) {
+              return res.status(400).json({
+                success: false,
+                message: "This service is already added for the patient",
+              });
+            }
+
+            // Step 6: Calculate net amount
+            let netAmount = baseCost;
+
+            if (discount_type === "Amount") {
+              netAmount = baseCost - discount_value;
+            } else if (discount_type === "Percentage") {
+              netAmount = baseCost - (baseCost * discount_value / 100);
+            }
+
+            if (netAmount < 0) netAmount = 0;
+
+            // Step 7: Insert patient service
+            const insertQuery = `
+              INSERT INTO patient_services 
+              (patientId, serviceId, amount, discount_type, discount_value, net_amount, extra_notes)
+              VALUES (?, ?, ?, ?, ?, ?, ?)
+            `;
+
+            pool.query(
+              insertQuery,
+              [
+                patientId,
+                serviceId,
+                baseCost,
+                discount_type || null,
+                discount_value || 0,
+                netAmount,
+                extra_notes || null,
+              ],
+              (insertErr, result) => {
+                if (insertErr) {
+                  return res.status(500).json({
+                    success: false,
+                    message: "Database error while inserting patient service",
+                    error: insertErr.message,
+                  });
+                }
+
+                return res.status(201).json({
+                  success: true,
+                  message: "Patient service created successfully",
+                  data: {
+                    id: result.insertId,
+                    patientId,
+                    serviceId,
+                    baseCost,
+                    discount_type,
+                    discount_value,
+                    netAmount,
+                    extra_notes,
+                    insuranceApplied: hasInsurance ? true : false, // 👈 extra info
+                  },
+                });
+              }
+            );
+          });
         });
       });
     });
@@ -5448,27 +5464,57 @@ const updateService = async (req, res) => {
       return res.status(400).json({ success: false, message: "ID is required" });
     }
 
-    // Step 1: Get existing service
     const getQuery = `SELECT * FROM services WHERE id = ?`;
     pool.query(getQuery, [id], (err, results) => {
       if (err) return res.status(500).json({ success: false, message: "DB error", error: err.message });
       if (results.length === 0) return res.status(404).json({ success: false, message: "Service not found" });
 
       const existing = results[0];
-      const {
-        serviceName = existing.serviceName,
-        description = existing.description,
-        category = existing.category,
-        durationMinutes = existing.durationMinutes,
-        standardCost = existing.standardCost,
-        secondaryCost = existing.secondaryCost,
-        insuranceCost = existing.insuranceCost,
-      } = req.body;
+      const body = req.body;
+
+      // Normal fields (fallback to existing if not sent)
+      const serviceName = body.serviceName ?? existing.serviceName;
+      const description = body.description ?? existing.description;
+      const category = body.category ?? existing.category;
+      const durationMinutes = body.durationMinutes ?? existing.durationMinutes;
+      const secondaryCost = body.secondaryCost ?? existing.secondaryCost;
+      const insuranceCost = body.insuranceCost ?? existing.insuranceCost;
+
+      // VAT handling → default = "No"
+      const vat = body.vat ?? "No";
+      const vat_value = body.vat_value;
+
+      // Standard cost base
+      let baseStandardCost = body.standardCost !== undefined
+        ? parseFloat(body.standardCost)
+        : parseFloat(existing.standardCost);
+
+      let finalStandardCost = baseStandardCost;
+      let vatValueToUse = 0;
+
+      if (vat === "Yes") {
+        if (body.standardCost === undefined || isNaN(baseStandardCost)) {
+          return res.status(400).json({
+            success: false,
+            message: "When VAT is 'Yes', standardCost is required and must be valid.",
+          });
+        }
+
+        if (vat_value === undefined || isNaN(vat_value)) {
+          return res.status(400).json({
+            success: false,
+            message: "VAT is enabled but vat_value is missing or invalid.",
+          });
+        }
+
+        vatValueToUse = parseFloat(vat_value);
+        finalStandardCost = baseStandardCost + (baseStandardCost * (vatValueToUse / 100));
+      }
 
       const updateQuery = `
         UPDATE services SET
           serviceName = ?, description = ?, category = ?, durationMinutes = ?,
-          standardCost = ?, secondaryCost = ?, insuranceCost = ?
+          vat = ?, vat_value = ?, standardCost = ?, secondaryCost = ?, insuranceCost = ?
         WHERE id = ?
       `;
 
@@ -5477,16 +5523,29 @@ const updateService = async (req, res) => {
         description,
         category,
         durationMinutes,
-        standardCost,
+        vat,
+        vatValueToUse,
+        finalStandardCost,
         secondaryCost,
         insuranceCost,
         id,
       ];
 
-      pool.query(updateQuery, values, (err2, result) => {
+      pool.query(updateQuery, values, (err2) => {
         if (err2) return res.status(500).json({ success: false, message: "Update error", error: err2.message });
 
-        return res.status(200).json({ success: true, message: "Service updated successfully" });
+        return res.status(200).json({
+          success: true,
+          message: "Service updated successfully",
+          data: {
+            id,
+            serviceName,
+            baseStandardCost,
+            standardCost: finalStandardCost,
+            vat,
+            vat_value: vatValueToUse
+          }
+        });
       });
     });
   } catch (error) {
@@ -10222,13 +10281,13 @@ const getRemainingInvoices = (req, res) => {
 };
 
 const addPaymentInvoice = (req, res) => {
-  const { invoice_id, amount, payment_method } = req.body;
+  const { invoice_id, amount, payment_method, transactionId } = req.body;
 
   // Basic validation
-  if (!invoice_id || !amount || !payment_method) {
+  if (!invoice_id || !amount || !payment_method || !transactionId) {
     return res.status(400).json({
       success: false,
-      message: "invoice_id, amount, and payment_method are required",
+      message: "invoice id, amount, transaction id and payment method are required",
     });
   }
 
@@ -10291,10 +10350,6 @@ const addPaymentInvoice = (req, res) => {
             message: `Payment exceeds remaining amount. Remaining: ${invoice.remaining_amount}`,
           });
         }
-
-        const transactionId = String(
-          Math.floor(1000000000 + Math.random() * 9000000000)
-        );
 
         // Step 2: Insert into payments
         await new Promise((resolve, reject) => {
@@ -11206,6 +11261,161 @@ const updateVat = (req, res) => {
   });
 };
 
+
+const addInsuranceClaim = (req, res) => {
+  const { patient_id, card_id, invoice_id, is_deductible_applied, co_insurance_percent } = req.body;
+
+  // Validation
+  if (!patient_id || !card_id || !invoice_id) {
+    return res.status(400).json({
+      success: false,
+      message: "patient_id, card_id, and invoice_id are required"
+    });
+  }
+
+  // 1. Get invoice total
+  const invoiceQuery = "SELECT total_amount FROM patient_invoices WHERE id = ?";
+  pool.query(invoiceQuery, [invoice_id], (err, invoiceResult) => {
+    if (err) return res.status(500).json({ success: false, message: "DB error (invoice)", error: err });
+    if (invoiceResult.length === 0) {
+      return res.status(404).json({ success: false, message: "Invoice not found" });
+    }
+
+    const invoice_total = parseFloat(invoiceResult[0].total_amount);
+
+    // 2. Get insurance card details
+    const cardQuery = "SELECT deductible_amount, co_insurance_percent FROM insurance_cards WHERE card_id = ?";
+    pool.query(cardQuery, [card_id], (err, cardResult) => {
+      if (err) return res.status(500).json({ success: false, message: "DB error (card)", error: err });
+      if (cardResult.length === 0) {
+        return res.status(404).json({ success: false, message: "Insurance card not found" });
+      }
+
+      const { deductible_amount, co_insurance_percent: cardPercent } = cardResult[0];
+      const deductible = parseFloat(deductible_amount || 0);
+      const coPercent = co_insurance_percent !== undefined ? parseFloat(co_insurance_percent) : parseFloat(cardPercent || 0);
+
+      if (coPercent < 0 || coPercent > 100) {
+        return res.status(400).json({ success: false, message: "co_insurance_percent must be between 0 and 100" });
+      }
+
+      // 3. Apply deductible if needed
+      let adjusted = invoice_total;
+      if (is_deductible_applied) {
+        adjusted = Math.max(invoice_total - deductible, 0);
+      }
+
+      // 4. Calculate amounts
+      const insurance_amount = (adjusted * coPercent) / 100;
+      let patient_amount = adjusted - insurance_amount;
+
+      if (is_deductible_applied) {
+        patient_amount += deductible;
+      }
+
+      // 5. Generate claim number
+      const claim_number = `CLAIM-${Date.now()}-${Math.floor(Math.random() * 10000)}`;
+
+      // 6. Insert claim into DB
+      const insertQuery = `
+        INSERT INTO insurance_claims 
+        (claim_number, patient_id, card_id, invoice_id, invoice_total, adjusted_amount, insurance_amount, patient_amount, is_deductible_applied, co_insurance_percent)
+        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+      `;
+
+      pool.query(
+        insertQuery,
+        [claim_number, patient_id, card_id, invoice_id, invoice_total, adjusted, insurance_amount, patient_amount, is_deductible_applied ? 1 : 0, coPercent],
+        (err, result) => {
+          if (err) return res.status(500).json({ success: false, message: "DB error (insert claim)", error: err });
+
+          return res.status(201).json({
+            success: true,
+            message: "Insurance claim created successfully",
+            data : {
+              claim_id: result.insertId,
+            claim_number,
+            invoice_total,
+            adjusted_amount: adjusted,
+            insurance_amount,
+            patient_amount,
+            is_deductible_applied: !!is_deductible_applied,
+            co_insurance_percent: coPercent
+            }
+            
+          });
+        }
+      );
+    });
+  });
+};
+
+const getAllInsuranceClaims = (req, res) => {
+  const sql = `
+    SELECT 
+      ic.id AS claim_id,
+      ic.claim_number,
+      ic.invoice_id,
+      pi.invoice_no,
+      pi.total_amount AS invoice_total,
+      ic.adjusted_amount,
+      ic.insurance_amount,
+      ic.patient_amount,
+      ic.is_deductible_applied,
+      ic.co_insurance_percent,
+      ic.status,
+      ic.created_at,
+      p.firstName,
+      p.middleName,
+      p.lastName,
+      c.company_name
+    FROM insurance_claims ic
+    LEFT JOIN patients p ON ic.patient_id = p.id
+    LEFT JOIN patient_invoices pi ON ic.invoice_id = pi.id
+    LEFT JOIN insurance_cards card ON ic.card_id = card.card_id
+    LEFT JOIN insurance_companies c ON card.company_id = c.company_id
+    ORDER BY ic.created_at DESC
+  `;
+
+  pool.query(sql, (err, results) => {
+    if (err) {
+      return res.status(500).json({
+        success: false,
+        message: "Database query failed",
+        error: err.message,
+      });
+    }
+
+    // 🔹 Format data like your invoices API
+    const formattedResults = results.map(row => {
+      const nameParts = [
+        row.firstName || "",
+        row.middleName || "",
+        row.lastName || ""
+      ];
+      const patient_name = nameParts.filter(Boolean).join(" ");
+
+      const { firstName, middleName, lastName, ...rest } = row;
+
+      return {
+        ...rest,
+        patient_name,
+      };
+    });
+
+    return res.status(200).json({
+      success: true,
+      message: formattedResults.length > 0
+        ? "All insurance claims fetched successfully"
+        : "No insurance claims found",
+      data: formattedResults,
+    });
+  });
+};
+
+
+
+
 export default {
   
   // users apis 
@@ -11423,6 +11633,9 @@ export default {
   editInsuranceCard,
   deleteInsuranceCard,
 
+  addInsuranceClaim,
+  getAllInsuranceClaims,
+
   getAllDiscount,
   updateDiscount,
 
@@ -11430,6 +11643,6 @@ export default {
   updateCurrency,
 
   getAllVat,
-  updateVat
+  updateVat,
 };
 

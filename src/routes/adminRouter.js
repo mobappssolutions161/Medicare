@@ -94,12 +94,12 @@ router.delete("/deleteDrug/:drugId", adminController.deleteDrug)
 
 router.post("/addServices", adminController.addServices)
 router.get("/getServices", adminController.getServices)
-router.put("/editLabServices/:labServiceId",adminController.editLabServices)
+router.put("/updateService/:id",adminController.updateService)
 router.delete("/deleteService/:id", adminController.deleteService)
 
 router.post("/addLabService", adminController.addLabService)
 router.get("/getAllLabServices", adminController.getAllLabServices)
-router.get("/getAllLabServices", adminController.getAllLabServices)
+router.get("/editLabServices/:labServiceId", adminController.editLabServices)
 router.delete("/deleteLabService/:serviceId", adminController.deleteLabService)
 
 router.post("/addLabs",upload.single("image"), adminController.addLabs)
@@ -216,6 +216,8 @@ router.get('/getAllInsuranceCards', adminController.getAllInsuranceCards);
 router.put('/editInsuranceCard/:card_id',upload.single("scanned_copy"),adminController.editInsuranceCard);
 router.delete('/deleteInsuranceCard/:id', adminController.deleteInsuranceCard);
 
+router.post('/addInsuranceClaim',adminController.addInsuranceClaim);
+router.get('/getAllInsuranceClaims', adminController.getAllInsuranceClaims);
 
 router.get('/getAllDiscount', adminController.getAllDiscount);
 router.put('/updateDiscount/:id', adminController.updateDiscount);
