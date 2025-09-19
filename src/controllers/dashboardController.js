@@ -444,7 +444,9 @@ const labRequestsReport = async (req, res) => {
         const query = `
             SELECT 
                 lr.id, 
-                CONCAT(p.firstName, ' ', p.middleName, ' ', p.lastName) AS patientName, 
+                p.firstName,
+                p.middleName,
+                p.lastName, 
                 l.lab_name AS labName, 
                 d.fullName AS doctorName, 
                 lr.title, 
@@ -498,8 +500,10 @@ const labRequestsReport = async (req, res) => {
                 { header: "Service IDs", key: "service_ids", width: 25 },
             ];
 
-            // Add data rows to the Excel sheet
-            results.forEach((row) => worksheet.addRow(row));
+            results.forEach((row) => {
+                row.patientName = `${row.firstName || ''} ${row.middleName || ''} ${row.lastName || ''}`;
+                worksheet.addRow(row);
+            });
 
             // Set response headers to prompt for Excel file download
             res.setHeader(
@@ -752,6 +756,390 @@ const insuranceClaimsReport = async (req, res) => {
     }
 };
 
+const patientsListReports = async (req, res) => {
+    try {
+        const query = `
+      SELECT 
+        p.id,
+        p.fileNumber,
+        p.firstName,
+        p.middleName,
+        p.lastName,
+        p.gender,
+        p.age,
+        p.mobileNumber,
+        p.email,
+        p.address,
+        p.dateOfBirth,
+        p.civilIdNumber,
+        p.passportNumber,
+        p.fileOpenedDate,
+        p.firstVisitDate,
+        p.lastVisitDate,
+        p.createdAt,
+        p.updatedAt,
+        d.fullName AS primaryDoctor
+      FROM patients p
+      LEFT JOIN doctors d ON p.defaultDoctorId = d.id
+    `;
+
+        pool.query(query, (err, patients) => {
+            if (err) {
+                console.error("DB Error:", err);
+                return res.status(500).json({ success: false, error: err.message });
+            }
+
+            const workbook = new ExcelJS.Workbook();
+            const worksheet = workbook.addWorksheet("Patients Report");
+
+            worksheet.columns = [
+                { header: "Patient ID", key: "id", width: 10 },
+                { header: "File No", key: "fileNumber", width: 10 },
+                { header: "Patient Name", key: "patientName", width: 30 },
+                { header: "Gender", key: "gender", width: 15 },
+                { header: "Age", key: "age", width: 10 },
+                { header: "Mobile Number", key: "mobileNumber", width: 20 },
+                { header: "Email", key: "email", width: 30 },
+                { header: "Address", key: "address", width: 40 },
+                { header: "Date of Birth", key: "dateOfBirth", width: 15 },
+                { header: "Civil ID Number", key: "civilIdNumber", width: 25 },
+                { header: "Passport Number", key: "passportNumber", width: 25 },
+                { header: "File Opened Date", key: "fileOpenedDate", width: 15 },
+                { header: "First Visit Date", key: "firstVisitDate", width: 15 },
+                { header: "Last Visit Date", key: "lastVisitDate", width: 15 },
+                { header: "Created At", key: "createdAt", width: 20 },
+                { header: "Updated At", key: "updatedAt", width: 20 },
+                { header: "Primary Doctor", key: "primaryDoctor", width: 25 }
+            ];
+
+            patients.forEach((row) => {
+                row.patientName = `${row.firstName || ''} ${row.middleName || ''} ${row.lastName || ''}`;
+                worksheet.addRow(row);
+            });
+
+            res.setHeader(
+                "Content-Type",
+                "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"
+            );
+            res.setHeader(
+                "Content-Disposition",
+                "attachment; filename=patients_list_report.xlsx"
+            );
+
+            workbook.xlsx.write(res).then(() => {
+                res.end();
+            }).catch(err => {
+                console.error("Excel write error:", err);
+                res.status(500).json({ success: false, error: err.message });
+            });
+        });
+
+    } catch (error) {
+        console.error("Error generating patients list report:", error);
+        res.status(500).json({
+            success: false,
+            error: error.message,
+        });
+    }
+};
+
+const patientsListReportsByGender = async (req, res) => {
+    try {
+        const query = `
+      SELECT 
+        p.id,
+        p.firstName,
+        p.middleName,
+        p.lastName,
+        p.gender,
+        p.age,
+        p.mobileNumber,
+        p.email,
+        p.address,
+        p.dateOfBirth,
+        p.civilIdNumber,
+        p.passportNumber,
+        p.fileOpenedDate,
+        p.firstVisitDate,
+        p.lastVisitDate,
+        p.createdAt,
+        p.updatedAt,
+        d.fullName AS primaryDoctor
+      FROM patients p
+      LEFT JOIN doctors d ON p.defaultDoctorId = d.id
+      ORDER BY 
+        CASE 
+          WHEN TRIM(LOWER(p.gender)) = 'male' THEN 1
+          WHEN TRIM(LOWER(p.gender)) = 'female' THEN 2
+          WHEN TRIM(LOWER(p.gender)) = 'other' THEN 3
+          ELSE 4
+        END
+    `;
+
+        pool.query(query, async (err, results) => {
+            if (err) {
+                console.error("DB Error:", err);
+                return res.status(500).json({ success: false, error: err.message });
+            }
+
+            // Prepare Excel Workbook
+            const workbook = new ExcelJS.Workbook();
+            const worksheet = workbook.addWorksheet("Patients by Gender");
+
+            worksheet.columns = [
+                { header: "Patient ID", key: "id", width: 10 },
+                { header: "Patient Name", key: "patientName", width: 30 },
+                { header: "Gender", key: "gender", width: 15 },
+                { header: "Age", key: "age", width: 10 },
+                { header: "Mobile Number", key: "mobileNumber", width: 20 },
+                { header: "Email", key: "email", width: 30 },
+                { header: "Address", key: "address", width: 40 },
+                { header: "Date of Birth", key: "dateOfBirth", width: 15 },
+                { header: "Civil ID Number", key: "civilIdNumber", width: 25 },
+                { header: "Passport Number", key: "passportNumber", width: 25 },
+                { header: "File Opened Date", key: "fileOpenedDate", width: 15 },
+                { header: "First Visit Date", key: "firstVisitDate", width: 15 },
+                { header: "Last Visit Date", key: "lastVisitDate", width: 15 },
+                { header: "Created At", key: "createdAt", width: 20 },
+                { header: "Updated At", key: "updatedAt", width: 20 },
+                { header: "Primary Doctor", key: "primaryDoctor", width: 25 }
+            ];
+
+            results.forEach(row => {
+                row.patientName = `${row.firstName || ''} ${row.middleName || ''} ${row.lastName || ''}`.trim();
+                worksheet.addRow(row);
+            });
+
+            // Set headers for file download
+            res.setHeader(
+                "Content-Type",
+                "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"
+            );
+            res.setHeader(
+                "Content-Disposition",
+                "attachment; filename=patients_by_gender_report.xlsx"
+            );
+
+            await workbook.xlsx.write(res);
+            res.end();
+        });
+    } catch (error) {
+        console.error("Error generating report by gender:", error);
+        res.status(500).json({ success: false, error: error.message });
+    }
+};
+
+const patientsListReportsByAge = async (req, res) => {
+    try {
+        const query = `
+            SELECT 
+                p.id,
+                p.firstName,
+                p.middleName,
+                p.lastName,
+                p.gender,
+                p.age,
+                p.mobileNumber,
+                p.email,
+                p.address,
+                p.dateOfBirth,
+                p.civilIdNumber,
+                p.passportNumber,
+                p.fileOpenedDate,
+                p.firstVisitDate,
+                p.lastVisitDate,
+                p.createdAt,
+                p.updatedAt,
+                d.fullName AS primaryDoctor,
+                CASE 
+                    WHEN p.age < 10 THEN 'Children'
+                    WHEN p.age < 20 THEN 'Teen'
+                    WHEN p.age < 50 THEN 'Young'
+                    ELSE 'Elderly'
+                END AS ageCategory
+            FROM patients p
+            LEFT JOIN doctors d ON p.defaultDoctorId = d.id
+            ORDER BY 
+                CASE 
+                    WHEN p.age < 10 THEN 1
+                    WHEN p.age < 20 THEN 2
+                    WHEN p.age < 50 THEN 3
+                    ELSE 4
+                END, p.age ASC
+        `;
+
+        pool.query(query, (err, patients) => {
+            if (err) {
+                console.error("DB Error:", err);
+                return res.status(500).json({ success: false, error: err.message });
+            }
+
+            const workbook = new ExcelJS.Workbook();
+            const worksheet = workbook.addWorksheet("Patients By Age");
+
+            worksheet.columns = [
+                { header: "Patient ID", key: "id", width: 10 },
+                { header: "Patient Name", key: "patientName", width: 30 },
+                { header: "Age Category", key: "ageCategory", width: 15 },
+                { header: "Age", key: "age", width: 10 },
+                { header: "Gender", key: "gender", width: 15 },
+                { header: "Mobile Number", key: "mobileNumber", width: 20 },
+                { header: "Email", key: "email", width: 30 },
+                { header: "Address", key: "address", width: 40 },
+                { header: "Date of Birth", key: "dateOfBirth", width: 15 },
+                { header: "Civil ID Number", key: "civilIdNumber", width: 25 },
+                { header: "Passport Number", key: "passportNumber", width: 25 },
+                { header: "File Opened Date", key: "fileOpenedDate", width: 15 },
+                { header: "First Visit Date", key: "firstVisitDate", width: 15 },
+                { header: "Last Visit Date", key: "lastVisitDate", width: 15 },
+                { header: "Created At", key: "createdAt", width: 20 },
+                { header: "Updated At", key: "updatedAt", width: 20 },
+                { header: "Primary Doctor", key: "primaryDoctor", width: 25 }
+            ];
+
+            patients.forEach((row) => {
+                const patientName = `${row.firstName || ''} ${row.middleName || ''} ${row.lastName || ''}`.trim();
+
+                worksheet.addRow({
+                    id: row.id,
+                    patientName,
+                    ageCategory: row.ageCategory,
+                    age: row.age,
+                    gender: row.gender,
+                    mobileNumber: row.mobileNumber,
+                    email: row.email,
+                    address: row.address,
+                    dateOfBirth: row.dateOfBirth,
+                    civilIdNumber: row.civilIdNumber,
+                    passportNumber: row.passportNumber,
+                    fileOpenedDate: row.fileOpenedDate,
+                    firstVisitDate: row.firstVisitDate,
+                    lastVisitDate: row.lastVisitDate,
+                    createdAt: row.createdAt,
+                    updatedAt: row.updatedAt,
+                    primaryDoctor: row.primaryDoctor
+                });
+            });
+
+            res.setHeader(
+                "Content-Type",
+                "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"
+            );
+            res.setHeader(
+                "Content-Disposition",
+                "attachment; filename=patients_by_age_category.xlsx"
+            );
+
+            workbook.xlsx.write(res)
+                .then(() => res.end())
+                .catch(err => {
+                    console.error("Excel write error:", err);
+                    res.status(500).json({ success: false, error: err.message });
+                });
+        });
+
+    } catch (error) {
+        console.error("Error generating age category report:", error);
+        res.status(500).json({
+            success: false,
+            error: error.message,
+        });
+    }
+};
+
+const testByLabsReport = async (req, res) => {
+    try {
+        const query = `
+            SELECT 
+                lr.id, 
+                p.firstName,
+                p.middleName,
+                p.lastName, 
+                l.lab_name AS labName, 
+                d.fullName AS doctorName, 
+                lr.title, 
+                lr.description, 
+                lr.sent_by, 
+                lr.status, 
+                lr.file, 
+                lr.created_at, 
+                lr.status_updated_at, 
+                lr.pending_at, 
+                lr.received_at, 
+                lr.service_ids
+            FROM lab_requests lr
+            JOIN patients p ON lr.patient_id = p.id
+            JOIN doctors d ON lr.doctor_id = d.id
+            JOIN labs l ON lr.lab_id = l.id
+            ORDER BY l.lab_name ASC, lr.created_at DESC
+        `;
+
+        pool.query(query, async (err, results) => {
+            if (err) {
+                console.error("DB Error:", err);
+                return res.status(500).json({ success: false, error: err.message });
+            }
+
+            const workbook = new ExcelJS.Workbook();
+            const worksheet = workbook.addWorksheet("Test By Labs Report");
+
+            worksheet.columns = [
+                { header: "Lab Request ID", key: "id", width: 15 },
+                { header: "Patient Name", key: "patientName", width: 30 },
+                { header: "Doctor Name", key: "doctorName", width: 30 },
+                { header: "Lab Name", key: "labName", width: 25 },
+                { header: "Title", key: "title", width: 30 },
+                { header: "Description", key: "description", width: 40 },
+                { header: "Sent By", key: "sent_by", width: 20 },
+                { header: "Status", key: "status", width: 15 },
+                { header: "File", key: "file", width: 30 },
+                { header: "Created At", key: "created_at", width: 20 },
+                { header: "Status Updated At", key: "status_updated_at", width: 20 },
+                { header: "Pending At", key: "pending_at", width: 20 },
+                { header: "Received At", key: "received_at", width: 20 },
+                { header: "Service IDs", key: "service_ids", width: 30 }
+            ];
+
+            results.forEach(row => {
+                const patientName = `${row.firstName || ''} ${row.middleName || ''} ${row.lastName || ''}`.trim();
+                worksheet.addRow({
+                    id: row.id,
+                    patientName,
+                    doctorName: row.doctorName,
+                    labName: row.labName,
+                    title: row.title,
+                    description: row.description,
+                    sent_by: row.sent_by,
+                    status: row.status,
+                    file: row.file,
+                    created_at: row.created_at,
+                    status_updated_at: row.status_updated_at,
+                    pending_at: row.pending_at,
+                    received_at: row.received_at,
+                    service_ids: row.service_ids
+                });
+            });
+
+            // Set response headers
+            res.setHeader(
+                'Content-Type',
+                'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet'
+            );
+            res.setHeader(
+                'Content-Disposition',
+                'attachment; filename=test_by_labs_report.xlsx'
+            );
+
+            await workbook.xlsx.write(res);
+            res.end();
+        });
+    } catch (error) {
+        console.error("Error generating lab test report:", error);
+        res.status(500).json({ success: false, error: error.message });
+    }
+};
+
+
 export default {
     getDashboardTotals,
     getPatientStatistics,
@@ -764,5 +1152,9 @@ export default {
     labRequestsReport,
     rxListReport,
     inventoryReport,
-    insuranceClaimsReport
+    insuranceClaimsReport,
+    patientsListReports,
+    patientsListReportsByGender,
+    patientsListReportsByAge,
+    testByLabsReport
 };
