@@ -190,6 +190,7 @@ router.put('/updateInsuranceStatus/:id', adminController.updateInsuranceStatus);
 // Billing Section
 router.post('/createInvoice', adminController.createInvoice);
 router.get('/getAllInvoicesByPatient/:patientId', adminController.getAllInvoicesByPatient);
+router.get('/getPartiallyPaidInvoices/:patient_id', adminController.getPartiallyPaidInvoices);
 router.get('/getRemainingInvoices/:patientId', adminController.getRemainingInvoices);
 
 router.post('/addPaymentInvoice', adminController.addPaymentInvoice);

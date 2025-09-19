@@ -1576,7 +1576,7 @@ const GetPatientServices = async (req, res) => {
         s.standardCost
       FROM patient_services ps
       INNER JOIN services AS s ON s.id = ps.serviceId
-      WHERE ps.patientId = ?
+      WHERE ps.patientId = ? ORDER BY createdAt DESC
     `;
 
     pool.query(sql, [patientId], (err, results) => {
@@ -2056,7 +2056,8 @@ const getPharmacyByPatientId = async (req, res) => {
       JOIN 
         drugs d ON pp.drugId = d.id
       WHERE 
-        pp.patient_id = ?;
+        pp.patient_id = ?
+      ORDER BY created_at DESC;
     `;
 
     pool.query(query, [patientId], (err, results) => {
@@ -5431,6 +5432,7 @@ const getServices = async (req, res) => {
         services s
       LEFT JOIN 
         service_categories sc ON s.category = sc.id
+      ORDER BY createdAt DESC
     `;
 
     pool.query(getQuery, (err, results) => {
@@ -10236,6 +10238,45 @@ const getAllInvoicesByPatient = (req,res)=>{
   }
 }
 
+const getPartiallyPaidInvoices = (req, res) => {
+  const { patient_id } = req.params; // agar patient wise chahiye toh
+
+  const sql = `
+    SELECT 
+      ic.id as claim_id,
+      ic.invoice_id,
+      pi.invoice_no,
+      pi.total_amount AS invoice_total,
+      ic.status,
+      ic.payment_status,
+      pi.patient_id,
+      CONCAT(p.firstName, ' ', IFNULL(p.middleName,''), ' ', p.lastName) AS patient_name
+    FROM insurance_claims ic
+    LEFT JOIN patient_invoices pi ON ic.invoice_id = pi.id
+    LEFT JOIN patients p ON pi.patient_id = p.id
+    WHERE ic.status = 'accepted'
+      AND ic.payment_status = 'partially_paid'
+      ${patient_id ? `AND pi.patient_id = ?` : ""}
+    ORDER BY ic.updated_at DESC
+  `;
+
+  pool.query(sql, patient_id ? [patient_id] : [], (err, results) => {
+    if (err) {
+      return res.status(500).json({
+        success: false,
+        message: "Database query failed",
+        error: err.message,
+      });
+    }
+
+    return res.status(200).json({
+      success: true,
+      data: results,
+    });
+  });
+};
+
+
 const getRemainingInvoices = (req, res) => {
   const { patientId } = req.params;
 
@@ -12313,6 +12354,7 @@ export default {
 
   createInvoice,
   getAllInvoicesByPatient,
+  getPartiallyPaidInvoices,
   getRemainingInvoices,
   addPaymentInvoice,
   getPaymentsByPatient,
