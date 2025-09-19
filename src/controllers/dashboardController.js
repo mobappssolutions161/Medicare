@@ -1139,6 +1139,385 @@ const testByLabsReport = async (req, res) => {
     }
 };
 
+const mostUsedServicesReport = async (req, res) => {
+    try {
+        const query = `
+      SELECT 
+        s.id,
+        s.serviceCode AS code,
+        s.serviceName AS name,
+        s.description,
+        s.category AS categoryId,
+        sc.category_name AS categoryName,
+        s.durationMinutes AS duration,
+        s.standardCost AS standard_price,
+        s.secondaryCost AS secondary_price,
+        s.insuranceCost AS insurance_price,
+        s.vat,
+        s.vat_value,
+        COUNT(ps.id) AS usageCount
+      FROM services s
+      LEFT JOIN service_categories sc ON s.category = sc.id
+      LEFT JOIN patient_services ps ON s.id = ps.serviceId
+      GROUP BY s.id
+      ORDER BY usageCount DESC
+    `;
+
+        pool.query(query, async (err, results) => {
+            if (err) {
+                console.error("DB Error:", err);
+                return res.status(500).json({ success: false, error: err.message });
+            }
+
+            const workbook = new ExcelJS.Workbook();
+            const worksheet = workbook.addWorksheet("Most Used Services Report");
+
+            worksheet.columns = [
+                { header: "Service ID", key: "id", width: 10 },
+                { header: "Service Code", key: "code", width: 15 },
+                { header: "Service Name", key: "name", width: 30 },
+                { header: "Usage Count", key: "usageCount", width: 15 },
+                { header: "Category Name", key: "categoryName", width: 25 },
+                { header: "Description", key: "description", width: 40 },
+                { header: "Duration (min)", key: "duration", width: 15 },
+                { header: "Standard Price", key: "standard_price", width: 15 },
+                { header: "Secondary Price", key: "secondary_price", width: 15 },
+                { header: "Insurance Price", key: "insurance_price", width: 15 },
+                { header: "VAT (%)", key: "vat", width: 10 },
+                { header: "VAT Value", key: "vat_value", width: 15 }
+            ];
+
+            results.forEach(row => {
+                worksheet.addRow(row);
+            });
+
+            res.setHeader(
+                'Content-Type',
+                'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet'
+            );
+            res.setHeader(
+                'Content-Disposition',
+                'attachment; filename=most_used_services_report.xlsx'
+            );
+
+            await workbook.xlsx.write(res);
+            res.end();
+        });
+
+    } catch (error) {
+        console.error("Error generating most used services report:", error);
+        res.status(500).json({ success: false, error: error.message });
+    }
+};
+
+const chiefComplaintsReport = async (req, res) => {
+    try {
+        const query = `
+      SELECT 
+        id,
+        text,
+        created_at,
+        updated_at
+      FROM chief_complaints
+      ORDER BY text ASC
+    `;
+
+        pool.query(query, async (err, results) => {
+            if (err) {
+                console.error("DB Error:", err);
+                return res.status(500).json({ success: false, error: err.message });
+            }
+
+            const workbook = new ExcelJS.Workbook();
+            const worksheet = workbook.addWorksheet("Chief Complaints Report");
+
+            worksheet.columns = [
+                { header: "ID", key: "id", width: 10 },
+                { header: "Chief Complaint", key: "text", width: 40 },
+                { header: "Created At", key: "created_at", width: 20 },
+                { header: "Updated At", key: "updated_at", width: 20 },
+            ];
+
+            results.forEach(row => {
+                worksheet.addRow(row);
+            });
+
+            res.setHeader(
+                'Content-Type',
+                'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet'
+            );
+            res.setHeader(
+                'Content-Disposition',
+                'attachment; filename=chief_complaints_report.xlsx'
+            );
+
+            await workbook.xlsx.write(res);
+            res.end();
+        });
+
+    } catch (error) {
+        console.error("Error generating chief complaints report:", error);
+        res.status(500).json({ success: false, error: error.message });
+    }
+};
+
+const allergiesReport = async (req, res) => {
+    try {
+        const query = `
+      SELECT 
+        p.id AS patientId,
+        p.firstName,
+        p.middleName,
+        p.lastName,
+        p.gender,
+        p.age,
+        pa.allergy_name,
+        pa.allergy_type,
+        pa.status,
+        pa.created_at
+      FROM patient_allergies pa
+      JOIN patients p ON pa.patient_id = p.id
+      ORDER BY p.id, pa.created_at DESC
+    `;
+
+        pool.query(query, async (err, results) => {
+            if (err) {
+                console.error("DB Error:", err);
+                return res.status(500).json({ success: false, error: err.message });
+            }
+
+            const workbook = new ExcelJS.Workbook();
+            const worksheet = workbook.addWorksheet("Allergies Report");
+
+            worksheet.columns = [
+                { header: "Patient ID", key: "patientId", width: 10 },
+                { header: "Patient Name", key: "patientName", width: 30 },
+                { header: "Gender", key: "gender", width: 10 },
+                { header: "Age", key: "age", width: 10 },
+                { header: "Allergy Name", key: "allergy_name", width: 30 },
+                { header: "Allergy Type", key: "allergy_type", width: 20 },
+                { header: "Status", key: "status", width: 15 },
+                { header: "Created At", key: "created_at", width: 20 }
+            ];
+
+            results.forEach(row => {
+                row.patientName = `${row.firstName || ''} ${row.middleName || ''} ${row.lastName || ''}`.trim();
+                worksheet.addRow(row);
+            });
+
+            res.setHeader(
+                'Content-Type',
+                'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet'
+            );
+            res.setHeader(
+                'Content-Disposition',
+                'attachment; filename=allergies_report.xlsx'
+            );
+
+            await workbook.xlsx.write(res);
+            res.end();
+        });
+
+    } catch (error) {
+        console.error("Error generating allergies report:", error);
+        res.status(500).json({ success: false, error: error.message });
+    }
+};
+
+const diagnosisPatientsReport = async (req, res) => {
+    try {
+        const query = `
+      SELECT 
+        pd.id AS diagnosisId,
+        p.firstName,
+        p.middleName,
+        p.lastName,
+        p.gender,
+        p.age,
+        d.fullName AS doctorName,
+        ic.code AS diagnosisCode,
+        ic.short_name AS diagnosisName,
+        pd.notes,
+        pd.diagnosis_date
+      FROM patient_diagnosis pd
+      JOIN patients p ON pd.patient_id = p.id
+      JOIN doctors d ON pd.doctor_id = d.id
+      JOIN icds_10 ic ON pd.icd10_id = ic.id
+      ORDER BY pd.diagnosis_date DESC
+    `;
+
+        pool.query(query, async (err, results) => {
+            if (err) {
+                console.error("DB Error:", err);
+                return res.status(500).json({ success: false, error: err.message });
+            }
+
+            const workbook = new ExcelJS.Workbook();
+            const worksheet = workbook.addWorksheet("Diagnosis Report");
+
+            worksheet.columns = [
+                { header: "Diagnosis ID", key: "diagnosisId", width: 12 },
+                { header: "Patient Name", key: "patientName", width: 30 },
+                { header: "Gender", key: "gender", width: 10 },
+                { header: "Age", key: "age", width: 8 },
+                { header: "Doctor Name", key: "doctorName", width: 30 },
+                { header: "Diagnosis Code", key: "diagnosisCode", width: 15 },
+                { header: "Diagnosis Name", key: "diagnosisName", width: 35 },
+                { header: "Notes", key: "notes", width: 40 },
+                { header: "Diagnosis Date", key: "diagnosis_date", width: 20 },
+            ];
+
+            results.forEach(row => {
+                row.patientName = `${row.firstName || ''} ${row.middleName || ''} ${row.lastName || ''}`.trim();
+                worksheet.addRow(row);
+            });
+
+            res.setHeader(
+                'Content-Type',
+                'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet'
+            );
+            res.setHeader(
+                'Content-Disposition',
+                'attachment; filename=diagnosis_patients_report.xlsx'
+            );
+
+            await workbook.xlsx.write(res);
+            res.end();
+        });
+
+    } catch (error) {
+        console.error("Error generating diagnosis report:", error);
+        res.status(500).json({ success: false, error: error.message });
+    }
+};
+
+const xRayReportsExport = async (req, res) => {
+    try {
+        const query = `
+      SELECT 
+        xr.id AS x_rayId,
+        p.firstName,
+        p.middleName,
+        p.lastName,
+        p.gender,
+        p.age,
+        pam.chief_complaint,
+        xr.title,
+        xr.description,
+        xr.attachment,
+        xr.created_at
+      FROM xray_and_radiology xr
+      JOIN patients p ON xr.patient_id = p.id
+      LEFT JOIN patient_all_medicals pam ON xr.medical_id = pam.id
+      ORDER BY xr.created_at DESC
+    `;
+
+        pool.query(query, async (err, results) => {
+            if (err) {
+                console.error("DB Error:", err);
+                return res.status(500).json({ success: false, error: err.message });
+            }
+
+            const workbook = new ExcelJS.Workbook();
+            const worksheet = workbook.addWorksheet("X-Ray & Radiology Reports");
+
+            worksheet.columns = [
+                { header: "Report ID", key: "x_rayId", width: 10 },
+                { header: "Patient Name", key: "patientName", width: 30 },
+                { header: "Gender", key: "gender", width: 10 },
+                { header: "Age", key: "age", width: 10 },
+                { header: "Chief Complaint", key: "chief_complaint", width: 30 },
+                { header: "Title", key: "title", width: 25 },
+                { header: "Description", key: "description", width: 40 },
+                { header: "Attachment", key: "attachment", width: 40 },
+                { header: "Created At", key: "created_at", width: 20 },
+            ];
+
+            results.forEach(row => {
+                row.patientName = `${row.firstName || ''} ${row.middleName || ''} ${row.lastName || ''}`.trim();
+                worksheet.addRow(row);
+            });
+
+            res.setHeader(
+                'Content-Type',
+                'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet'
+            );
+            res.setHeader(
+                'Content-Disposition',
+                'attachment; filename=xray_reports.xlsx'
+            );
+
+            await workbook.xlsx.write(res);
+            res.end();
+        });
+
+    } catch (error) {
+        console.error("Error generating X-ray report:", error);
+        res.status(500).json({ success: false, error: error.message });
+    }
+};
+
+const doctorsReportExport = async (req, res) => {
+    try {
+        const query = `
+      SELECT 
+        d.*, 
+        u.email 
+      FROM doctors d
+      LEFT JOIN users u ON d.user_id = u.id
+      ORDER BY d.fullName ASC
+    `;
+
+        pool.query(query, async (err, results) => {
+            if (err) {
+                console.error("DB Error:", err);
+                return res.status(500).json({ success: false, error: err.message });
+            }
+
+            const workbook = new ExcelJS.Workbook();
+            const worksheet = workbook.addWorksheet("Doctors Report");
+
+            worksheet.columns = [
+                { header: "Doctor ID", key: "id", width: 10 },
+                { header: "Full Name", key: "fullName", width: 30 },
+                { header: "Short Name", key: "shortName", width: 20 },
+                { header: "Phone Number", key: "phoneNumber", width: 20 },
+                { header: "Prefix", key: "prefix", width: 10 },
+                { header: "Date of Birth", key: "dateOfBirth", width: 15 },
+                { header: "License ID", key: "licenseId", width: 20 },
+                { header: "Civil ID", key: "civilId", width: 20 },
+                { header: "Passport", key: "passport", width: 20 },
+                { header: "Gender", key: "gender", width: 10 },
+                { header: "Specialty", key: "specialty", width: 25 },
+                { header: "Personal Photo", key: "personalPhoto", width: 30 },
+                { header: "Email", key: "email", width: 30 },
+                { header: "Created At", key: "createdAt", width: 20 },
+                { header: "Updated At", key: "updatedAt", width: 20 },
+            ];
+
+            results.forEach(row => {
+                worksheet.addRow(row);
+            });
+
+            res.setHeader(
+                "Content-Type",
+                "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"
+            );
+            res.setHeader(
+                "Content-Disposition",
+                "attachment; filename=doctors_report.xlsx"
+            );
+
+            await workbook.xlsx.write(res);
+            res.end();
+        });
+
+    } catch (error) {
+        console.error("Error generating doctors report:", error);
+        res.status(500).json({ success: false, error: error.message });
+    }
+};
+
 
 export default {
     getDashboardTotals,
@@ -1156,5 +1535,11 @@ export default {
     patientsListReports,
     patientsListReportsByGender,
     patientsListReportsByAge,
-    testByLabsReport
+    testByLabsReport,
+    mostUsedServicesReport,
+    chiefComplaintsReport,
+    allergiesReport,
+    diagnosisPatientsReport,
+    xRayReportsExport,
+    doctorsReportExport
 };

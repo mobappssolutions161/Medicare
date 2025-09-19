@@ -22,6 +22,12 @@ router.get("/dashboard/patients_list_report", dashController.patientsListReports
 router.get("/dashboard/patients_report_by_gender", dashController.patientsListReportsByGender);
 router.get("/dashboard/patients_report_by_age", dashController.patientsListReportsByAge);
 router.get("/dashboard/patients_report_test_bylabs", dashController.testByLabsReport);
+router.get("/dashboard/services_mostused_report", dashController.mostUsedServicesReport);
+router.get("/dashboard/chief_complaints_report", dashController.chiefComplaintsReport);
+router.get("/dashboard/allergies_report", dashController.allergiesReport);
+router.get("/dashboard/patients_diagnosis_report", dashController.diagnosisPatientsReport);
+router.get("/dashboard/patients_xray_reports", dashController.xRayReportsExport);
+router.get("/dashboard/doctors_report", dashController.doctorsReportExport);
 
 
 
