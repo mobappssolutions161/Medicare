@@ -9,6 +9,7 @@ dotenv.config()
 
 import adminRouter from "./src/routes/adminRouter.js"
 import userRouter from "./src/routes/userRouter.js"
+import dashRouter from "./src/routes/dashboardRouter.js"
 
 app.use(cors())
 app.use(express.json())
@@ -34,6 +35,7 @@ const PORT = process.env.PORT || 4401
 
 app.use("/api",adminRouter)
 app.use("/api",userRouter)
+app.use("/api",dashRouter)
 app.get("/",(req,res)=>{
     res.send("Welcome to homepage")
 })

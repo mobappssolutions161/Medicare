@@ -1,0 +1,23 @@
+import express from "express";
+import dashController from "../controllers/dashboardController.js";
+
+const router = express.Router();
+
+router.get("/dashboard", dashController.getDashboardTotals);
+router.get("/dashboard/patients/statistics", dashController.getPatientStatistics);
+router.get("/dashboard/patients/gender", dashController.getPatientsByGender);
+router.get("/dashboard/patients/age", dashController.getPatientsByAge);
+router.get("/dashboard/patients/pie_chart", dashController.getPatientPieChartData);
+
+router.get("/dashboard/top_services", dashController.getTopServices);
+router.get("/dashboard/lab_request_stats", dashController.getLabRequestStats);
+
+router.get("/dashboard/appointment_report", dashController.appointmentsReport);
+router.get("/dashboard/lab_request_report", dashController.labRequestsReport);
+router.get("/dashboard/rx_list_report", dashController.rxListReport);
+router.get("/dashboard/get_inventory_report", dashController.inventoryReport);
+router.get("/dashboard/insurance_claims_report", dashController.insuranceClaimsReport);
+
+
+
+export default router;
