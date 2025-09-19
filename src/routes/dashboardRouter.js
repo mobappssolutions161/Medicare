@@ -18,6 +18,11 @@ router.get("/dashboard/rx_list_report", dashController.rxListReport);
 router.get("/dashboard/get_inventory_report", dashController.inventoryReport);
 router.get("/dashboard/insurance_claims_report", dashController.insuranceClaimsReport);
 
+router.get("/dashboard/patients_list_report", dashController.patientsListReports);
+router.get("/dashboard/patients_report_by_gender", dashController.patientsListReportsByGender);
+router.get("/dashboard/patients_report_by_age", dashController.patientsListReportsByAge);
+router.get("/dashboard/patients_report_test_bylabs", dashController.testByLabsReport);
+
 
 
 export default router;
