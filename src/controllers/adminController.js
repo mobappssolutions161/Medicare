@@ -10208,7 +10208,7 @@ const getAllInvoicesByPatient = (req,res)=>{
       })
     }
 
-    const selectQuery = `Select * from patient_invoices where patient_id = ?`
+    const selectQuery = `Select * from patient_invoices where patient_id = ? order by invoice_date DESC`
     pool.query(selectQuery,[patientId],(error,result)=>{
       if(error){
         return res.status(500).json({
@@ -11051,6 +11051,62 @@ const getAllInsuranceCards = (req, res) => {
   });
 };
 
+const getInsuranceCardsByPatientId = (req, res) => {
+  const { patientId } = req.params;
+
+  if (!patientId) {
+    return res.status(400).json({
+      success: false,
+      message: "Patient ID is required",
+    });
+  }
+
+  const sql = `
+    SELECT ic.*,
+           p.firstName, p.middleName, p.lastName,
+           icom.company_name
+    FROM insurance_cards ic
+    LEFT JOIN insurance_companies icom ON ic.company_id = icom.company_id
+    LEFT JOIN patients p ON ic.patient_id = p.id
+    WHERE ic.is_deleted = 0 AND ic.patient_id = ? AND ic.claimed =  "No" AND ic.status = "active"
+    ORDER BY ic.updated_at DESC
+  `;
+
+  pool.query(sql, [patientId], (err, results) => {
+    if (err) {
+      return res.status(500).json({
+        success: false,
+        message: "Database query failed",
+        error: err.message,
+      });
+    }
+
+    const formattedResults = results.map(row => {
+      const nameParts = [
+        row.firstName || "",
+        row.middleName || "",
+        row.lastName || ""
+      ];
+      const patient_name = nameParts.filter(Boolean).join(" ");
+      const { firstName, middleName, lastName, ...rest } = row;
+
+      return {
+        ...rest,
+        patient_name
+      }
+    });
+
+    return res.status(200).json({
+      success: true,
+      message: formattedResults.length > 0
+        ? `Insurance cards for patient ID ${patientId} fetched successfully`
+        : `No insurance cards found for patient ID ${patientId}`,
+      data: formattedResults,
+    });
+  });
+};
+
+
 const editInsuranceCard = (req, res) => {
   try {
     const { card_id } = req.params;
@@ -11161,6 +11217,447 @@ const deleteInsuranceCard = (req, res) => {
   });
 };
 
+const addInsuranceClaim = (req, res) => {
+  const { patient_id, card_id, invoice_id, is_deductible_applied, co_insurance_percent } = req.body;
+
+  if (!patient_id || !card_id || !invoice_id) {
+    return res.status(400).json({
+      success: false,
+      message: "patient_id, card_id, and invoice_id are required"
+    });
+  }
+
+  pool.getConnection((err, connection) => {
+    if (err) return res.status(500).json({ success: false, message: "DB connection error", error: err });
+
+    connection.beginTransaction(err => {
+      if (err) {
+        connection.release();
+        return res.status(500).json({ success: false, message: "Transaction start error", error: err });
+      }
+
+      const invoiceQuery = "SELECT total_amount FROM patient_invoices WHERE id = ?";
+      connection.query(invoiceQuery, [invoice_id], (err, invoiceResult) => {
+        if (err) return rollback(connection, res, "DB error (invoice)", err);
+        if (invoiceResult.length === 0) return rollback(connection, res, "Invoice not found");
+
+        const invoice_total = parseFloat(invoiceResult[0].total_amount);
+
+        const cardQuery = "SELECT company_id,deductible_amount, co_insurance_percent FROM insurance_cards WHERE card_id = ?";
+        connection.query(cardQuery, [card_id], (err, cardResult) => {
+          if (err) return rollback(connection, res, "DB error (card)", err);
+          if (cardResult.length === 0) return rollback(connection, res, "Insurance card not found");
+
+          const { company_id, deductible_amount, co_insurance_percent: cardPercent } = cardResult[0];
+          const deductible = parseFloat(deductible_amount || 0);
+          const coPercent = co_insurance_percent !== undefined ? parseFloat(co_insurance_percent) : parseFloat(cardPercent || 0);
+
+          if (coPercent < 0 || coPercent > 100) return rollback(connection, res, "co_insurance_percent must be between 0 and 100");
+
+          let adjusted = invoice_total;
+          if (is_deductible_applied) {
+            adjusted = Math.max(invoice_total - deductible, 0);
+          }
+
+          const insurance_amount = (adjusted * coPercent) / 100;
+          let patient_amount = adjusted - insurance_amount;
+
+          const claim_number = `CLAIM-${Date.now()}-${Math.floor(Math.random() * 10000)}`;
+
+          const insertClaimQuery = `
+            INSERT INTO insurance_claims 
+            (claim_number, patient_id, company_id, card_id, invoice_id, invoice_total, adjusted_amount, insurance_amount, patient_amount, is_deductible_applied, co_insurance_percent)
+            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+          `;
+
+          connection.query(
+            insertClaimQuery,
+            [claim_number, patient_id, company_id, card_id, invoice_id, invoice_total, adjusted, insurance_amount, patient_amount, is_deductible_applied ? 1 : 0, coPercent],
+            (err, result) => {
+              if (err) return rollback(connection, res, "DB error (insert claim)", err);
+
+              const insertedClaimId = result.insertId;
+
+              const insertCompanyClaimQuery = `
+                INSERT INTO insurance_company_claim (company_id, claim_id)
+                VALUES (?, ?)
+              `;
+
+              connection.query(insertCompanyClaimQuery, [company_id, insertedClaimId], (err2, result2) => {
+                if (err2) return rollback(connection, res, "DB error (insert company claim)", err2);
+
+                // ✅ Yaha insurance_cards.claimed ko YES update karenge
+                const updateCardQuery = `UPDATE insurance_cards SET claimed = 'yes' WHERE card_id = ?`;
+
+                connection.query(updateCardQuery, [card_id], (err3) => {
+                  if (err3) return rollback(connection, res, "DB error (update card claimed)", err3);
+
+                  connection.commit(err => {
+                    if (err) return rollback(connection, res, "Commit failed", err);
+
+                    connection.release();
+
+                    return res.status(201).json({
+                      success: true,
+                      message: "Insurance claim created successfully",
+                      data: {
+                        claim_id: insertedClaimId,
+                        company_id,
+                        claim_number,
+                        invoice_total,
+                        adjusted_amount: adjusted,
+                        insurance_amount,
+                        patient_amount,
+                        is_deductible_applied: !!is_deductible_applied,
+                        co_insurance_percent: coPercent,
+                        company_claim_id: result2.insertId,
+                        card_claimed_status: "yes"
+                      }
+                    });
+                  });
+                });
+              });
+            }
+          );
+        });
+      });
+    });
+  });
+};
+
+// Helper function for rollback
+function rollback(connection, res, message, error = null) {
+  connection.rollback(() => {
+    connection.release();
+    return res.status(500).json({ success: false, message, error });
+  });
+}
+
+
+const getClaimsByCompanyId = (req, res) => {
+  try {
+    const companyId = req.params.company_id;
+    const { status } = req.query; // ✅ Now using query param
+
+    const allowedStatuses = ['pending', 'accepted', 'paid', 'rejected'];
+
+    // Validate status if provided
+    if (status && !allowedStatuses.includes(status)) {
+      return res.status(400).json({
+        success: false,
+        message: "Invalid status. Allowed values are: pending, accepted, paid, rejected."
+      });
+    }
+
+    let query = `
+      SELECT 
+        insurance_company_claim.id,
+        insurance_company_claim.claim_id,
+        insurance_company_claim.company_id,
+        insurance_company_claim.status,
+        insurance_company_claim.payment_status,
+        insurance_company_claim.created_at,
+        insurance_company_claim.updated_at,
+        insurance_claims.claim_number,
+        insurance_claims.patient_id,
+        insurance_claims.card_id,
+        insurance_claims.invoice_id,
+        insurance_claims.invoice_total,
+        insurance_claims.adjusted_amount,
+        insurance_claims.insurance_amount,
+        insurance_claims.patient_amount,
+        insurance_claims.is_deductible_applied,
+        insurance_claims.co_insurance_percent
+      FROM insurance_company_claim
+      JOIN insurance_claims ON insurance_company_claim.company_id = insurance_claims.company_id
+    `;
+
+    const queryParams = [companyId];
+
+    if (status) {
+      query += ` AND insurance_company_claim.status = ?`;
+      queryParams.push(status);
+    }
+
+    pool.query(query, queryParams, (err, results) => {
+      if (err) {
+        return res.status(500).json({
+          success: false,
+          message: "Database error",
+          error: err
+        });
+      }
+
+      return res.status(200).json({
+        success: true,
+        total_claims: results.length,
+        data: results
+      });
+    });
+
+  } catch (error) {
+    return res.status(500).json({
+      success: false,
+      message: "Unexpected server error",
+      error: error.message || error
+    });
+  }
+};
+
+const updateInsuranceClaimStatus = (req, res) => {
+  const connection = pool; // mysql connection
+
+  try {
+    const id = req.params.id; // Primary key of insurance_company_claim
+    const { status } = req.body;
+
+    const allowedStatuses = ['pending', 'accepted', 'paid', 'rejected'];
+
+    if (!status || !allowedStatuses.includes(status)) {
+      return res.status(400).json({
+        success: false,
+        message: "Invalid or missing status. Allowed values: pending, accepted, paid, rejected."
+      });
+    }
+
+    // Start transaction
+    connection.getConnection((err, conn) => {
+      if (err) {
+        return res.status(500).json({ success: false, message: "Database connection error", error: err });
+      }
+
+      conn.beginTransaction(err => {
+        if (err) {
+          conn.release();
+          return res.status(500).json({ success: false, message: "Transaction start error", error: err });
+        }
+
+        // 1. Get claim_id from insurance_company_claim
+        const getClaimIdQuery = `SELECT claim_id FROM insurance_company_claim WHERE id = ?`;
+
+        conn.query(getClaimIdQuery, [id], (err, result1) => {
+          if (err || result1.length === 0) {
+            return conn.rollback(() => {
+              conn.release();
+              return res.status(404).json({
+                success: false,
+                message: "Claim not found or query error",
+                error: err
+              });
+            });
+          }
+
+          const claim_id = result1[0].claim_id;
+
+          // 2. Update insurance_company_claim
+          const updateCompanyClaim = `
+            UPDATE insurance_company_claim 
+            SET status = ?, updated_at = CURRENT_TIMESTAMP
+            WHERE id = ?
+          `;
+
+          conn.query(updateCompanyClaim, [status, id], (err2, result2) => {
+            if (err2) {
+              return conn.rollback(() => {
+                conn.release();
+                return res.status(500).json({ success: false, message: "Error updating company claim", error: err2 });
+              });
+            }
+
+            // 3. Update insurance_claims
+            const updateClaim = `
+              UPDATE insurance_claims 
+              SET status = ?, updated_at = CURRENT_TIMESTAMP 
+              WHERE id = ?
+            `;
+
+            conn.query(updateClaim, [status, claim_id], (err3, result3) => {
+              if (err3) {
+                return conn.rollback(() => {
+                  conn.release();
+                  return res.status(500).json({ success: false, message: "Error updating insurance claim", error: err3 });
+                });
+              }
+
+              // 4. Commit if both updates succeeded
+              conn.commit(errCommit => {
+                if (errCommit) {
+                  return conn.rollback(() => {
+                    conn.release();
+                    return res.status(500).json({ success: false, message: "Commit failed", error: errCommit });
+                  });
+                }
+
+                conn.release();
+
+                return res.status(200).json({
+                  success: true,
+                  message: `Status updated to '${status}' in both tables`,
+                  insurance_company_claim_id: id,
+                  insurance_claim_id: claim_id
+                });
+              });
+            });
+          });
+        });
+      });
+    });
+
+  } catch (error) {
+    return res.status(500).json({
+      success: false,
+      message: "Unexpected server error",
+      error: error.message || error
+    });
+  }
+};
+
+
+
+const getAllInsuranceClaims = (req, res) => {
+  const sql = `
+    SELECT 
+      ic.id AS claim_id,
+      ic.patient_id ,
+      ic.claim_number,
+      card.policy_number,
+      ic.invoice_id,
+      pi.invoice_no,
+      pi.total_amount AS invoice_total,
+      ic.adjusted_amount,
+      ic.insurance_amount,
+      ic.patient_amount,
+      ic.is_deductible_applied,
+      ic.co_insurance_percent,
+      ic.status,
+      ic.created_at,
+      p.firstName,
+      p.middleName,
+      p.lastName,
+      c.company_name
+    FROM insurance_claims ic
+    LEFT JOIN patients p ON ic.patient_id = p.id
+    LEFT JOIN patient_invoices pi ON ic.invoice_id = pi.id
+    LEFT JOIN insurance_cards card ON ic.card_id = card.card_id
+    LEFT JOIN insurance_companies c ON card.company_id = c.company_id
+    ORDER BY ic.created_at DESC
+  `;
+
+  pool.query(sql, (err, results) => {
+    if (err) {
+      return res.status(500).json({
+        success: false,
+        message: "Database query failed",
+        error: err.message,
+      });
+    }
+
+    // 🔹 Format data like your invoices API
+    const formattedResults = results.map(row => {
+      const nameParts = [
+        row.firstName || "",
+        row.middleName || "",
+        row.lastName || ""
+      ];
+      const patient_name = nameParts.filter(Boolean).join(" ");
+
+      const { firstName, middleName, lastName, ...rest } = row;
+
+      return {
+        ...rest,
+        patient_name,
+      };
+    });
+
+    return res.status(200).json({
+      success: true,
+      message: formattedResults.length > 0
+        ? "All insurance claims fetched successfully"
+        : "No insurance claims found",
+      data: formattedResults,
+    });
+  });
+};
+
+const getInsuranceClaimsByPatientId = (req, res) => {
+  const { patientId } = req.params;
+
+  if (!patientId) {
+    return res.status(400).json({
+      success: false,
+      message: "Patient ID is required",
+    });
+  }
+
+  const sql = `
+    SELECT 
+      ic.id AS claim_id,
+      ic.patient_id,
+      ic.claim_number,
+      card.policy_number,
+      ic.invoice_id,
+      pi.invoice_no,
+      pi.total_amount AS invoice_total,
+      ic.adjusted_amount,
+      ic.insurance_amount,
+      ic.patient_amount,
+      ic.is_deductible_applied,
+      ic.co_insurance_percent,
+      ic.status,
+      ic.created_at,
+      p.firstName,
+      p.middleName,
+      p.lastName,
+      p.gender,
+      p.age,
+      p.email,
+      p.civilIdNumber,
+      p.mobileNumber,
+      c.company_name
+    FROM insurance_claims ic
+    LEFT JOIN patients p ON ic.patient_id = p.id
+    LEFT JOIN patient_invoices pi ON ic.invoice_id = pi.id
+    LEFT JOIN insurance_cards card ON ic.card_id = card.card_id
+    LEFT JOIN insurance_companies c ON card.company_id = c.company_id
+    WHERE ic.patient_id = ?
+    ORDER BY ic.created_at DESC
+  `;
+
+  pool.query(sql, [patientId], (err, results) => {
+    if (err) {
+      return res.status(500).json({
+        success: false,
+        message: "Database query failed",
+        error: err.message,
+      });
+    }
+
+    const formattedResults = results.map(row => {
+      const nameParts = [
+        row.firstName || "",
+        row.middleName || "",
+        row.lastName || ""
+      ];
+      const patient_name = nameParts.filter(Boolean).join(" ");
+
+      const { firstName, middleName, lastName, ...rest } = row;
+
+      return {
+        ...rest,
+        patient_name,
+      };
+    });
+
+    return res.status(200).json({
+      success: true,
+      message: formattedResults.length > 0
+        ? `Insurance claims for patient ID ${patientId} fetched successfully`
+        : `No insurance claims found for patient ID ${patientId}`,
+      data: formattedResults,
+    });
+  });
+};
+
 const getAllDiscount = (req, res) => {
   const sql = "SELECT * FROM discounts ";
   pool.query(sql, (err, results) => {
@@ -11262,159 +11759,218 @@ const updateVat = (req, res) => {
 };
 
 
-const addInsuranceClaim = (req, res) => {
-  const { patient_id, card_id, invoice_id, is_deductible_applied, co_insurance_percent } = req.body;
+const processInsurancePayment = (req, res) => {
+  const connection = pool;
+  const documentPath = req.file ? req.file.originalname : null;
 
-  // Validation
-  if (!patient_id || !card_id || !invoice_id) {
+  let { company_id, payment_date, payment_reference, total_amount, claims } = req.body;
+
+  // ✅ Parse claims
+  try {
+    claims = JSON.parse(claims);
+  } catch (e) {
+    return res.status(400).json({ success: false, message: "Invalid claims format" });
+  }
+
+  // ✅ Basic validations
+  if (!company_id || isNaN(company_id)) {
+    return res.status(400).json({ success: false, message: "Invalid or missing company_id" });
+  }
+  if (!payment_date || isNaN(new Date(payment_date).getTime())) {
+    return res.status(400).json({ success: false, message: "Invalid or missing payment_date" });
+  }
+  if (!payment_reference || typeof payment_reference !== "string" || payment_reference.length > 100) {
+    return res.status(400).json({ success: false, message: "Invalid or missing payment_reference" });
+  }
+  if (!total_amount || isNaN(total_amount) || total_amount < 0) {
+    return res.status(400).json({ success: false, message: "Invalid or missing total_amount" });
+  }
+  if (!Array.isArray(claims) || claims.length === 0) {
+    return res.status(400).json({ success: false, message: "Claims must be a non-empty array" });
+  }
+
+  // ✅ Validate claims data
+  for (const claim of claims) {
+    if (!claim.claim_id || isNaN(claim.claim_id)) {
+      return res.status(400).json({ success: false, message: "Invalid or missing claim_id in claims" });
+    }
+    if (claim.entered_amount === undefined || isNaN(claim.entered_amount) || claim.entered_amount < 0) {
+      return res.status(400).json({ success: false, message: `Invalid entered_amount for claim ${claim.claim_id}` });
+    }
+  }
+
+  // ✅ Validate sum of claims vs total_amount
+  const sumClaims = claims.reduce((sum, c) => sum + Number(c.entered_amount), 0);
+  if (sumClaims > Number(total_amount)) {
     return res.status(400).json({
       success: false,
-      message: "patient_id, card_id, and invoice_id are required"
+      message: `Invalid: sum of claims (${sumClaims}) cannot exceed total_amount (${total_amount})`
     });
   }
 
-  // 1. Get invoice total
-  const invoiceQuery = "SELECT total_amount FROM patient_invoices WHERE id = ?";
-  pool.query(invoiceQuery, [invoice_id], (err, invoiceResult) => {
-    if (err) return res.status(500).json({ success: false, message: "DB error (invoice)", error: err });
-    if (invoiceResult.length === 0) {
-      return res.status(404).json({ success: false, message: "Invoice not found" });
+  // ✅ Start transaction
+  connection.getConnection((err, conn) => {
+    if (err) {
+      return res.status(500).json({ success: false, message: "Database connection error", error: err });
     }
 
-    const invoice_total = parseFloat(invoiceResult[0].total_amount);
-
-    // 2. Get insurance card details
-    const cardQuery = "SELECT deductible_amount, co_insurance_percent FROM insurance_cards WHERE card_id = ?";
-    pool.query(cardQuery, [card_id], (err, cardResult) => {
-      if (err) return res.status(500).json({ success: false, message: "DB error (card)", error: err });
-      if (cardResult.length === 0) {
-        return res.status(404).json({ success: false, message: "Insurance card not found" });
+    conn.beginTransaction(async err => {
+      if (err) {
+        conn.release();
+        return res.status(500).json({ success: false, message: "Transaction start error", error: err });
       }
 
-      const { deductible_amount, co_insurance_percent: cardPercent } = cardResult[0];
-      const deductible = parseFloat(deductible_amount || 0);
-      const coPercent = co_insurance_percent !== undefined ? parseFloat(co_insurance_percent) : parseFloat(cardPercent || 0);
+      try {
+        for (const claim of claims) {
+          const { claim_id, entered_amount } = claim;
 
-      if (coPercent < 0 || coPercent > 100) {
-        return res.status(400).json({ success: false, message: "co_insurance_percent must be between 0 and 100" });
-      }
+          // Fetch insurance_claim
+          const [claimRow] = await new Promise((resolve, reject) => {
+            conn.query(
+              `SELECT insurance_amount, invoice_id 
+               FROM insurance_claims WHERE id = ?`,
+              [claim_id],
+              (err, result) => (err ? reject(err) : resolve(result))
+            );
+          });
 
-      // 3. Apply deductible if needed
-      let adjusted = invoice_total;
-      if (is_deductible_applied) {
-        adjusted = Math.max(invoice_total - deductible, 0);
-      }
+          if (!claimRow) throw new Error(`Claim ${claim_id} not found`);
 
-      // 4. Calculate amounts
-      const insurance_amount = (adjusted * coPercent) / 100;
-      let patient_amount = adjusted - insurance_amount;
+          const { insurance_amount, invoice_id } = claimRow;
 
-      if (is_deductible_applied) {
-        patient_amount += deductible;
-      }
+          // ✅ Check pending insurance vs entered_amount
+          if (entered_amount > insurance_amount) {
+            throw new Error(
+              `Entered amount ${entered_amount} cannot exceed pending insurance amount ${insurance_amount} for claim ${claim_id}`
+            );
+          }
 
-      // 5. Generate claim number
-      const claim_number = `CLAIM-${Date.now()}-${Math.floor(Math.random() * 10000)}`;
+          // New insurance amount
+          let newInsuranceAmount = insurance_amount - entered_amount;
+          if (newInsuranceAmount < 0) newInsuranceAmount = 0;
 
-      // 6. Insert claim into DB
-      const insertQuery = `
-        INSERT INTO insurance_claims 
-        (claim_number, patient_id, card_id, invoice_id, invoice_total, adjusted_amount, insurance_amount, patient_amount, is_deductible_applied, co_insurance_percent)
-        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
-      `;
+          let paymentStatus = "pending";
+          let companyStatus = "pending";
 
-      pool.query(
-        insertQuery,
-        [claim_number, patient_id, card_id, invoice_id, invoice_total, adjusted, insurance_amount, patient_amount, is_deductible_applied ? 1 : 0, coPercent],
-        (err, result) => {
-          if (err) return res.status(500).json({ success: false, message: "DB error (insert claim)", error: err });
+          if (newInsuranceAmount === 0) {
+            paymentStatus = "fully_paid";
+            companyStatus = "accepted";
+          } else if (newInsuranceAmount < insurance_amount) {
+            paymentStatus = "partially_paid";
+            companyStatus = "accepted";
+          }
 
-          return res.status(201).json({
-            success: true,
-            message: "Insurance claim created successfully",
-            data : {
-              claim_id: result.insertId,
-            claim_number,
-            invoice_total,
-            adjusted_amount: adjusted,
-            insurance_amount,
-            patient_amount,
-            is_deductible_applied: !!is_deductible_applied,
-            co_insurance_percent: coPercent
-            }
-            
+          // Update insurance_claims
+          await new Promise((resolve, reject) => {
+            conn.query(
+              `UPDATE insurance_claims 
+               SET insurance_amount = ?, payment_status = ?, status = ?, updated_at = CURRENT_TIMESTAMP 
+               WHERE id = ?`,
+              [newInsuranceAmount, paymentStatus, companyStatus, claim_id],
+              (err, result) => (err ? reject(err) : resolve(result))
+            );
+          });
+
+          // Update insurance_company_claim
+          await new Promise((resolve, reject) => {
+            conn.query(
+              `UPDATE insurance_company_claim 
+               SET payment_status = ?, status = ?, updated_at = CURRENT_TIMESTAMP
+               WHERE claim_id = ? AND company_id = ?`,
+              [paymentStatus, companyStatus, claim_id, company_id],
+              (err, result) => (err ? reject(err) : resolve(result))
+            );
+          });
+
+          // Fetch patient invoice
+          const [invoiceRow] = await new Promise((resolve, reject) => {
+            conn.query(
+              `SELECT remaining_amount, total_amount, paid_amount 
+               FROM patient_invoices WHERE id = ?`,
+              [invoice_id],
+              (err, result) => (err ? reject(err) : resolve(result))
+            );
+          });
+
+          if (!invoiceRow) throw new Error(`Invoice ${invoice_id} not found`);
+
+          // Calculate new invoice amounts
+          let newRemainingAmount = invoiceRow.remaining_amount - entered_amount;
+          if (newRemainingAmount < 0) newRemainingAmount = 0;
+
+          let newPaidAmount = invoiceRow.paid_amount + entered_amount;
+          if (newPaidAmount > invoiceRow.total_amount) newPaidAmount = invoiceRow.total_amount;
+
+          let invoiceStatus = "Not Paid";
+          let status = "Remaining";
+
+          if (newRemainingAmount === 0 && newPaidAmount === invoiceRow.total_amount) {
+            invoiceStatus = "Fully Paid";
+            status = "Completed";
+          } else if (newPaidAmount > 0 && newRemainingAmount > 0) {
+            invoiceStatus = "Partially Paid";
+            status = "Remaining";
+          } else if (newPaidAmount === 0) {
+            invoiceStatus = "Not Paid";
+            status = "Remaining";
+          }
+
+          // Update patient_invoices
+          await new Promise((resolve, reject) => {
+            conn.query(
+              `UPDATE patient_invoices 
+               SET remaining_amount = ?, paid_amount = ?, invoice_status = ?, status = ?, updated_at = CURRENT_TIMESTAMP
+               WHERE id = ?`,
+              [newRemainingAmount, newPaidAmount, invoiceStatus, status, invoice_id],
+              (err, result) => (err ? reject(err) : resolve(result))
+            );
           });
         }
-      );
+
+        // Insert into insurance_payments
+        await new Promise((resolve, reject) => {
+          conn.query(
+            `INSERT INTO insurance_payments 
+             (company_id, claims, payment_date, payment_reference, total_amount, document, created_at) 
+             VALUES (?, ?, ?, ?, ?, ?, NOW())`,
+            [company_id, JSON.stringify(claims), payment_date, payment_reference, total_amount, documentPath],
+            (err, result) => (err ? reject(err) : resolve(result))
+          );
+        });
+
+        conn.commit(errCommit => {
+          if (errCommit) {
+            return conn.rollback(() => {
+              conn.release();
+              return res.status(500).json({ success: false, message: "Commit failed", error: errCommit });
+            });
+          }
+
+          conn.release();
+          return res.status(200).json({
+            success: true,
+            message: "Payment processed successfully with insurance + patient invoice updates",
+            company_id,
+            total_amount,
+            payment_reference,
+            document: documentPath,
+            claims
+          });
+        });
+
+      } catch (error) {
+        conn.rollback(() => {
+          conn.release();
+          return res.status(500).json({
+            success: false,
+            message: "Error while processing payment",
+            error: error.message || error
+          });
+        });
+      }
     });
   });
 };
-
-const getAllInsuranceClaims = (req, res) => {
-  const sql = `
-    SELECT 
-      ic.id AS claim_id,
-      ic.claim_number,
-      ic.invoice_id,
-      pi.invoice_no,
-      pi.total_amount AS invoice_total,
-      ic.adjusted_amount,
-      ic.insurance_amount,
-      ic.patient_amount,
-      ic.is_deductible_applied,
-      ic.co_insurance_percent,
-      ic.status,
-      ic.created_at,
-      p.firstName,
-      p.middleName,
-      p.lastName,
-      c.company_name
-    FROM insurance_claims ic
-    LEFT JOIN patients p ON ic.patient_id = p.id
-    LEFT JOIN patient_invoices pi ON ic.invoice_id = pi.id
-    LEFT JOIN insurance_cards card ON ic.card_id = card.card_id
-    LEFT JOIN insurance_companies c ON card.company_id = c.company_id
-    ORDER BY ic.created_at DESC
-  `;
-
-  pool.query(sql, (err, results) => {
-    if (err) {
-      return res.status(500).json({
-        success: false,
-        message: "Database query failed",
-        error: err.message,
-      });
-    }
-
-    // 🔹 Format data like your invoices API
-    const formattedResults = results.map(row => {
-      const nameParts = [
-        row.firstName || "",
-        row.middleName || "",
-        row.lastName || ""
-      ];
-      const patient_name = nameParts.filter(Boolean).join(" ");
-
-      const { firstName, middleName, lastName, ...rest } = row;
-
-      return {
-        ...rest,
-        patient_name,
-      };
-    });
-
-    return res.status(200).json({
-      success: true,
-      message: formattedResults.length > 0
-        ? "All insurance claims fetched successfully"
-        : "No insurance claims found",
-      data: formattedResults,
-    });
-  });
-};
-
-
-
 
 export default {
   
@@ -11630,11 +12186,15 @@ export default {
 
   addInsuranceCard,
   getAllInsuranceCards,
+  getInsuranceCardsByPatientId,
   editInsuranceCard,
   deleteInsuranceCard,
 
   addInsuranceClaim,
+  getClaimsByCompanyId,
+  updateInsuranceClaimStatus,
   getAllInsuranceClaims,
+  getInsuranceClaimsByPatientId,
 
   getAllDiscount,
   updateDiscount,
@@ -11644,5 +12204,6 @@ export default {
 
   getAllVat,
   updateVat,
+  processInsurancePayment
 };
 

@@ -213,11 +213,15 @@ router.delete('/deleteInsuranceCompany/:id', adminController.deleteInsuranceComp
 
 router.post('/addInsuranceCard',upload.single("scanned_copy"), adminController.addInsuranceCard);
 router.get('/getAllInsuranceCards', adminController.getAllInsuranceCards);
+router.get('/getInsuranceCardsByPatientId/:patientId', adminController.getInsuranceCardsByPatientId);
 router.put('/editInsuranceCard/:card_id',upload.single("scanned_copy"),adminController.editInsuranceCard);
 router.delete('/deleteInsuranceCard/:id', adminController.deleteInsuranceCard);
 
 router.post('/addInsuranceClaim',adminController.addInsuranceClaim);
+router.get('/getClaimsByCompanyId/:companyId', adminController.getClaimsByCompanyId);
+router.put('/updateInsuranceClaimStatus/:id', adminController.updateInsuranceClaimStatus);
 router.get('/getAllInsuranceClaims', adminController.getAllInsuranceClaims);
+router.get('/getInsuranceClaimsByPatientId/:patientId', adminController.getInsuranceClaimsByPatientId);
 
 router.get('/getAllDiscount', adminController.getAllDiscount);
 router.put('/updateDiscount/:id', adminController.updateDiscount);
@@ -227,5 +231,7 @@ router.put('/updateCurrency/:id', adminController.updateCurrency);
 
 router.get('/getAllVat', adminController.getAllVat);
 router.put('/updateVat/:id', adminController.updateVat);
+
+router.post('/processInsurancePayment', upload.single("document"),adminController.processInsurancePayment);
 
 export default router;
