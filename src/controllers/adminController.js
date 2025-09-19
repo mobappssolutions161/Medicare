@@ -10284,10 +10284,10 @@ const addPaymentInvoice = (req, res) => {
   const { invoice_id, amount, payment_method, transactionId } = req.body;
 
   // Basic validation
-  if (!invoice_id || !amount || !payment_method || !transactionId) {
+  if (!invoice_id || !amount || !payment_method ) {
     return res.status(400).json({
       success: false,
-      message: "invoice id, amount, transaction id and payment method are required",
+      message: "invoice id, amount and payment method are required",
     });
   }
 
@@ -10815,6 +10815,8 @@ const getAllInsuranceCompanies = (req, res) => {
   });
 };
 
+
+
 // Get Company by ID
 const getInsuranceCompanyById = (req, res) => {
   const { id } = req.params;
@@ -10899,6 +10901,32 @@ const updateInsuranceCompany = (req, res) => {
           return res.status(200).json({ success: true, message: "Insurance company updated successfully" });
         }
       );
+    });
+  });
+};
+
+const getActiveInsuranceCompanies = (req, res) => {
+  const sql = `
+    SELECT company_id, company_name, address, phone_number, email, website, company_logo, status
+    FROM insurance_companies
+    WHERE status = 'active'
+      AND isDeleted = "0"
+    ORDER BY updated_at DESC
+  `;
+
+  pool.query(sql, (err, results) => {
+    if (err) {
+      return res.status(500).json({
+        success: false,
+        message: "Database query failed",
+        error: err.message,
+      });
+    }
+
+    return res.status(200).json({
+      success: true,
+      total_active: results.length,
+      data: results,
     });
   });
 };
@@ -11050,6 +11078,8 @@ const getAllInsuranceCards = (req, res) => {
     });
   });
 };
+
+
 
 const getInsuranceCardsByPatientId = (req, res) => {
   const { patientId } = req.params;
@@ -11337,49 +11367,62 @@ function rollback(connection, res, message, error = null) {
 const getClaimsByCompanyId = (req, res) => {
   try {
     const companyId = req.params.company_id;
-    const { status } = req.query; // ✅ Now using query param
+    const { status } = req.query;
 
     const allowedStatuses = ['pending', 'accepted', 'paid', 'rejected'];
 
-    // Validate status if provided
+    // Validate status
     if (status && !allowedStatuses.includes(status)) {
       return res.status(400).json({
         success: false,
-        message: "Invalid status. Allowed values are: pending, accepted, paid, rejected."
+        message: "Invalid status. Allowed values: pending, accepted, paid, rejected."
       });
     }
 
     let query = `
       SELECT 
-        insurance_company_claim.id,
-        insurance_company_claim.claim_id,
-        insurance_company_claim.company_id,
-        insurance_company_claim.status,
-        insurance_company_claim.payment_status,
-        insurance_company_claim.created_at,
-        insurance_company_claim.updated_at,
-        insurance_claims.claim_number,
-        insurance_claims.patient_id,
-        insurance_claims.card_id,
-        insurance_claims.invoice_id,
-        insurance_claims.invoice_total,
-        insurance_claims.adjusted_amount,
-        insurance_claims.insurance_amount,
-        insurance_claims.patient_amount,
-        insurance_claims.is_deductible_applied,
-        insurance_claims.co_insurance_percent
-      FROM insurance_company_claim
-      JOIN insurance_claims ON insurance_company_claim.company_id = insurance_claims.company_id
+        icc.id,
+        icc.claim_id,
+        icc.company_id,
+        icc.status,
+        icc.payment_status,
+        icc.created_at,
+        icc.updated_at,
+        ic.claim_number,
+        ic.patient_id,
+        ic.card_id,
+        ic.invoice_id,
+        ic.invoice_total,
+        ic.adjusted_amount,
+        ic.insurance_amount,
+        ic.patient_amount,
+        ic.is_deductible_applied,
+        ic.co_insurance_percent,
+        p.firstName,
+        p.middleName,
+        p.lastName,
+        icard.policy_number,
+        inv.invoice_no
+      FROM insurance_company_claim icc
+      JOIN insurance_claims ic 
+        ON icc.claim_id = ic.id
+      LEFT JOIN patients p 
+        ON ic.patient_id = p.id
+      LEFT JOIN insurance_cards icard 
+        ON ic.card_id = icard.card_id
+      LEFT JOIN patient_invoices inv 
+        ON ic.invoice_id = inv.id
+      WHERE icc.company_id = ?
     `;
 
-    const queryParams = [companyId];
+    const params = [companyId];
 
     if (status) {
-      query += ` AND insurance_company_claim.status = ?`;
-      queryParams.push(status);
+      query += ` AND icc.status = ?`;
+      params.push(status);
     }
 
-    pool.query(query, queryParams, (err, results) => {
+    pool.query(query, params, (err, results) => {
       if (err) {
         return res.status(500).json({
           success: false,
@@ -11388,10 +11431,29 @@ const getClaimsByCompanyId = (req, res) => {
         });
       }
 
+      // ✅ format results: clean name + keep invoice_no
+      const formattedResults = results.map(row => {
+        const nameParts = [
+          row.firstName || "",
+          row.middleName || "",
+          row.lastName || ""
+        ];
+        const patient_name = nameParts.filter(Boolean).join(" ");
+
+        // remove raw fields
+        const { firstName, middleName, lastName, ...rest } = row;
+
+        return {
+          ...rest,
+          patient_name,
+          invoice_no: row.invoice_no || null
+        };
+      });
+
       return res.status(200).json({
         success: true,
-        total_claims: results.length,
-        data: results
+        total_claims: formattedResults.length,
+        data: formattedResults
       });
     });
 
@@ -11403,6 +11465,92 @@ const getClaimsByCompanyId = (req, res) => {
     });
   }
 };
+
+const getUnpaidClaimsByCompanyId = (req, res) => {
+  try {
+    const companyId = req.params.company_id;
+
+    let query = `
+      SELECT 
+        icc.id,
+        icc.claim_id,
+        icc.company_id,
+        icc.status,
+        icc.payment_status,
+        icc.created_at,
+        icc.updated_at,
+        ic.claim_number,
+        ic.patient_id,
+        ic.card_id,
+        ic.invoice_id,
+        ic.invoice_total,
+        ic.adjusted_amount,
+        ic.insurance_amount,
+        ic.patient_amount,
+        ic.is_deductible_applied,
+        ic.co_insurance_percent,
+        p.firstName,
+        p.middleName,
+        p.lastName,
+        icard.policy_number,
+        inv.invoice_no
+      FROM insurance_company_claim icc
+      JOIN insurance_claims ic 
+        ON icc.claim_id = ic.id
+      LEFT JOIN patients p 
+        ON ic.patient_id = p.id
+      LEFT JOIN insurance_cards icard 
+        ON ic.card_id = icard.card_id
+      LEFT JOIN patient_invoices inv 
+        ON ic.invoice_id = inv.id
+      WHERE icc.company_id = ?
+      AND icc.status = 'accepted'
+      AND (icc.payment_status IS NULL OR icc.payment_status != 'fully_paid')
+    `;
+
+    pool.query(query, [companyId], (err, results) => {
+      if (err) {
+        return res.status(500).json({
+          success: false,
+          message: "Database error",
+          error: err
+        });
+      }
+
+      // ✅ format results: clean name + keep invoice_no
+      const formattedResults = results.map(row => {
+        const nameParts = [
+          row.firstName || "",
+          row.middleName || "",
+          row.lastName || ""
+        ];
+        const patient_name = nameParts.filter(Boolean).join(" ");
+
+        const { firstName, middleName, lastName, ...rest } = row;
+
+        return {
+          ...rest,
+          patient_name,
+          invoice_no: row.invoice_no || null
+        };
+      });
+
+      return res.status(200).json({
+        success: true,
+        total_claims: formattedResults.length,
+        data: formattedResults
+      });
+    });
+
+  } catch (error) {
+    return res.status(500).json({
+      success: false,
+      message: "Unexpected server error",
+      error: error.message || error
+    });
+  }
+};
+
 
 const updateInsuranceClaimStatus = (req, res) => {
   const connection = pool; // mysql connection
@@ -12182,6 +12330,7 @@ export default {
   getAllInsuranceCompanies,
   getInsuranceCompanyById,
   updateInsuranceCompany,
+  getActiveInsuranceCompanies,
   deleteInsuranceCompany,
 
   addInsuranceCard,
@@ -12192,6 +12341,7 @@ export default {
 
   addInsuranceClaim,
   getClaimsByCompanyId,
+  getUnpaidClaimsByCompanyId,
   updateInsuranceClaimStatus,
   getAllInsuranceClaims,
   getInsuranceClaimsByPatientId,

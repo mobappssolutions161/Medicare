@@ -209,6 +209,7 @@ router.post('/createInsuranceCompany',upload.single("company_logo"), adminContro
 router.get('/getAllInsuranceCompanies', adminController.getAllInsuranceCompanies);
 router.get('/getInsuranceCompanyById/:id', adminController.getInsuranceCompanyById);
 router.put('/updateInsuranceCompany/:id',upload.single("company_logo"),adminController.updateInsuranceCompany);
+router.get('/getActiveInsuranceCompanies',adminController.getActiveInsuranceCompanies);
 router.delete('/deleteInsuranceCompany/:id', adminController.deleteInsuranceCompany);
 
 router.post('/addInsuranceCard',upload.single("scanned_copy"), adminController.addInsuranceCard);
@@ -218,7 +219,8 @@ router.put('/editInsuranceCard/:card_id',upload.single("scanned_copy"),adminCont
 router.delete('/deleteInsuranceCard/:id', adminController.deleteInsuranceCard);
 
 router.post('/addInsuranceClaim',adminController.addInsuranceClaim);
-router.get('/getClaimsByCompanyId/:companyId', adminController.getClaimsByCompanyId);
+router.get('/getClaimsByCompanyId/:company_id', adminController.getClaimsByCompanyId);
+router.get('/getUnpaidClaimsByCompanyId/:company_id', adminController.getUnpaidClaimsByCompanyId);
 router.put('/updateInsuranceClaimStatus/:id', adminController.updateInsuranceClaimStatus);
 router.get('/getAllInsuranceClaims', adminController.getAllInsuranceClaims);
 router.get('/getInsuranceClaimsByPatientId/:patientId', adminController.getInsuranceClaimsByPatientId);
