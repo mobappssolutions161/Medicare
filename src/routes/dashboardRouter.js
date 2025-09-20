@@ -29,6 +29,10 @@ router.get("/dashboard/patients_diagnosis_report", dashController.diagnosisPatie
 router.get("/dashboard/patients_xray_reports", dashController.xRayReportsExport);
 router.get("/dashboard/doctors_report", dashController.doctorsReportExport);
 
+router.get("/dashboard/patient_invoices_report", dashController.patientInvoicesExport);
+router.get("/dashboard/cash_payments_report", dashController.cashPaymentsReport);
+router.get("/dashboard/creditCard_payments_report", dashController.creditCardPaymentsReport);
+
 
 
 export default router;

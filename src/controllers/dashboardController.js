@@ -1051,27 +1051,11 @@ const testByLabsReport = async (req, res) => {
     try {
         const query = `
             SELECT 
-                lr.id, 
-                p.firstName,
-                p.middleName,
-                p.lastName, 
-                l.lab_name AS labName, 
-                d.fullName AS doctorName, 
-                lr.title, 
-                lr.description, 
-                lr.sent_by, 
-                lr.status, 
-                lr.file, 
-                lr.created_at, 
-                lr.status_updated_at, 
-                lr.pending_at, 
-                lr.received_at, 
-                lr.service_ids
-            FROM lab_requests lr
-            JOIN patients p ON lr.patient_id = p.id
-            JOIN doctors d ON lr.doctor_id = d.id
-            JOIN labs l ON lr.lab_id = l.id
-            ORDER BY l.lab_name ASC, lr.created_at DESC
+                l.*, 
+                COUNT(lr.lab_id) AS assigned_count
+            FROM labs l
+            LEFT JOIN lab_requests lr ON l.id = lr.lab_id
+            GROUP BY l.id
         `;
 
         pool.query(query, async (err, results) => {
@@ -1084,43 +1068,35 @@ const testByLabsReport = async (req, res) => {
             const worksheet = workbook.addWorksheet("Test By Labs Report");
 
             worksheet.columns = [
-                { header: "Lab Request ID", key: "id", width: 15 },
-                { header: "Patient Name", key: "patientName", width: 30 },
-                { header: "Doctor Name", key: "doctorName", width: 30 },
-                { header: "Lab Name", key: "labName", width: 25 },
-                { header: "Title", key: "title", width: 30 },
-                { header: "Description", key: "description", width: 40 },
-                { header: "Sent By", key: "sent_by", width: 20 },
-                { header: "Status", key: "status", width: 15 },
-                { header: "File", key: "file", width: 30 },
+                { header: "Lab ID", key: "id", width: 10 },
+                { header: "Lab Name", key: "lab_name", width: 25 },
+                { header: "Speciality", key: "speciality", width: 20 },
+                { header: "Phone Number", key: "phone_number", width: 15 },
+                { header: "Email", key: "email", width: 25 },
+                { header: "Address", key: "address", width: 30 },
+                { header: "Notes", key: "notes", width: 25 },
+                { header: "Pending", key: "pending", width: 10 },
+                { header: "Is Active", key: "is_active", width: 10 },
                 { header: "Created At", key: "created_at", width: 20 },
-                { header: "Status Updated At", key: "status_updated_at", width: 20 },
-                { header: "Pending At", key: "pending_at", width: 20 },
-                { header: "Received At", key: "received_at", width: 20 },
-                { header: "Service IDs", key: "service_ids", width: 30 }
+                { header: "Requests", key: "assigned_count", width: 15 },
             ];
 
             results.forEach(row => {
-                const patientName = `${row.firstName || ''} ${row.middleName || ''} ${row.lastName || ''}`.trim();
                 worksheet.addRow({
                     id: row.id,
-                    patientName,
-                    doctorName: row.doctorName,
-                    labName: row.labName,
-                    title: row.title,
-                    description: row.description,
-                    sent_by: row.sent_by,
-                    status: row.status,
-                    file: row.file,
+                    lab_name: row.lab_name,
+                    speciality: row.speciality,
+                    phone_number: row.phone_number,
+                    email: row.email,
+                    address: row.address,
+                    notes: row.notes,
+                    pending: row.pending,
+                    is_active: row.is_active === 1 ? "Yes" : "No",
                     created_at: row.created_at,
-                    status_updated_at: row.status_updated_at,
-                    pending_at: row.pending_at,
-                    received_at: row.received_at,
-                    service_ids: row.service_ids
+                    assigned_count: row.assigned_count,
                 });
             });
 
-            // Set response headers
             res.setHeader(
                 'Content-Type',
                 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet'
@@ -1133,8 +1109,9 @@ const testByLabsReport = async (req, res) => {
             await workbook.xlsx.write(res);
             res.end();
         });
+
     } catch (error) {
-        console.error("Error generating lab test report:", error);
+        console.error("Error generating Test By Labs Report:", error);
         res.status(500).json({ success: false, error: error.message });
     }
 };
@@ -1518,6 +1495,249 @@ const doctorsReportExport = async (req, res) => {
     }
 };
 
+const patientInvoicesExport = async (req, res) => {
+    try {
+        const query = `
+            SELECT 
+                pi.*, 
+                p.firstName, 
+                p.middleName, 
+                p.lastName
+            FROM patient_invoices pi
+            LEFT JOIN patients p ON pi.patient_id = p.id
+            ORDER BY pi.updated_at DESC
+        `;
+
+        pool.query(query, async (err, results) => {
+            if (err) {
+                console.error("DB Error:", err);
+                return res.status(500).json({ success: false, error: err.message });
+            }
+
+            const workbook = new ExcelJS.Workbook();
+            const worksheet = workbook.addWorksheet("Patient Invoices");
+
+            worksheet.columns = [
+                { header: "Invoice ID", key: "id", width: 10 },
+                { header: "Invoice No", key: "invoice_no", width: 20 },
+                { header: "Invoice Date", key: "invoiceDate", width: 15 },
+                { header: "Invoice Time", key: "invoiceTime", width: 15 },
+                { header: "Patient Name", key: "patientName", width: 30 },
+                { header: "Total Services", key: "total_services", width: 15 },
+                { header: "Total Amount", key: "total_amount", width: 15 },
+                { header: "Paid Amount", key: "paid_amount", width: 15 },
+                { header: "Remaining Amount", key: "remaining_amount", width: 18 },
+                { header: "Status", key: "status", width: 15 },
+                { header: "Invoice Status", key: "invoice_status", width: 20 },
+                { header: "Updated At", key: "updated_at", width: 20 },
+            ];
+
+            results.forEach(row => {
+                const patientName = `${row.firstName || ''} ${row.middleName || ''} ${row.lastName || ''}`.trim();
+
+                const invoiceDateObj = new Date(row.invoice_date);
+                const invoiceDate = invoiceDateObj.toISOString().split('T')[0];
+                const invoiceTime = invoiceDateObj.toTimeString().split(' ')[0];
+
+                worksheet.addRow({
+                    id: row.id,
+                    invoice_no: row.invoice_no,
+                    invoiceDate: invoiceDate,
+                    invoiceTime: invoiceTime,
+                    patientName: patientName,
+                    total_services: row.total_services,
+                    total_amount: row.total_amount,
+                    paid_amount: row.paid_amount,
+                    remaining_amount: row.remaining_amount,
+                    status: row.status,
+                    invoice_status: row.invoice_status,
+                    updated_at: row.updated_at,
+                });
+            });
+
+            res.setHeader(
+                'Content-Type',
+                'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet'
+            );
+            res.setHeader(
+                'Content-Disposition',
+                'attachment; filename=patient_invoices_report.xlsx'
+            );
+
+            await workbook.xlsx.write(res);
+            res.end();
+        });
+
+    } catch (error) {
+        console.error("Error generating patient invoice report:", error);
+        res.status(500).json({ success: false, error: error.message });
+    }
+};
+
+const cashPaymentsReport = async (req, res) => {
+    try {
+        const query = `
+            SELECT 
+                ppi.*, 
+                pi.invoice_no, 
+                pi.invoice_date,
+                pt.firstName, pt.middleName, pt.lastName
+            FROM patient_payment_invoices ppi
+            LEFT JOIN patient_invoices pi ON ppi.invoice_id = pi.id
+            LEFT JOIN patients pt ON pi.patient_id = pt.id
+            WHERE ppi.payment_method = 'cash'
+            ORDER BY ppi.updated_at DESC
+        `;
+
+        pool.query(query, async (err, results) => {
+            if (err) {
+                console.error("DB Error:", err);
+                return res.status(500).json({ success: false, error: err.message });
+            }
+
+            const workbook = new ExcelJS.Workbook();
+            const worksheet = workbook.addWorksheet("Cash Payment Invoices");
+
+            worksheet.columns = [
+                { header: "Payment ID", key: "id", width: 10 },
+                { header: "Invoice No", key: "invoice_no", width: 20 },
+                { header: "Invoice Date", key: "invoiceDate", width: 15 },
+                { header: "Payment Date", key: "paymentDate", width: 20 },
+                { header: "Payment Time", key: "paymentTime", width: 15 },
+                { header: "Patient Name", key: "patientName", width: 30 },
+                { header: "Payment Amount", key: "payment_amount", width: 15 },
+                { header: "Payment Method", key: "payment_method", width: 15 },
+                { header: "Transaction ID", key: "transactionId", width: 25 },
+                { header: "Payment Status", key: "payment_status", width: 15 },
+                { header: "Updated At", key: "updated_at", width: 20 },
+            ];
+
+            results.forEach(row => {
+                const patientName = `${row.firstName || ''} ${row.middleName || ''} ${row.lastName || ''}`.trim();
+
+                const invoiceDateObj = row.invoice_date ? new Date(row.invoice_date) : null;
+                const invoiceDate = invoiceDateObj ? invoiceDateObj.toISOString().split('T')[0] : '';
+
+                const paymentDateObj = row.payment_date ? new Date(row.payment_date) : null;
+                const paymentDate = paymentDateObj ? paymentDateObj.toISOString().split('T')[0] : '';
+                const paymentTime = paymentDateObj ? paymentDateObj.toTimeString().split(' ')[0] : '';
+
+                worksheet.addRow({
+                    id: row.id,
+                    invoice_no: row.invoice_no,
+                    invoiceDate: invoiceDate,
+                    paymentDate: paymentDate,
+                    paymentTime: paymentTime,
+                    patientName: patientName,
+                    payment_amount: row.payment_amount,
+                    payment_method: row.payment_method,
+                    transactionId: row.transactionId,
+                    payment_status: row.payment_status,
+                    updated_at: row.updated_at,
+                });
+            });
+
+            res.setHeader(
+                'Content-Type',
+                'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet'
+            );
+            res.setHeader(
+                'Content-Disposition',
+                'attachment; filename=cash_payments_report.xlsx'
+            );
+
+            await workbook.xlsx.write(res);
+            res.end();
+        });
+
+    } catch (error) {
+        console.error("Error generating cash payments report:", error);
+        res.status(500).json({ success: false, error: error.message });
+    }
+};
+
+const creditCardPaymentsReport = async (req, res) => {
+    try {
+        const query = `
+            SELECT 
+                ppi.*, 
+                pi.invoice_no, 
+                pi.invoice_date,
+                pt.firstName, pt.middleName, pt.lastName
+            FROM patient_payment_invoices ppi
+            LEFT JOIN patient_invoices pi ON ppi.invoice_id = pi.id
+            LEFT JOIN patients pt ON pi.patient_id = pt.id
+            WHERE ppi.payment_method = 'credit card'
+            ORDER BY ppi.updated_at DESC
+        `;
+
+        pool.query(query, async (err, results) => {
+            if (err) {
+                console.error("DB Error:", err);
+                return res.status(500).json({ success: false, error: err.message });
+            }
+
+            const workbook = new ExcelJS.Workbook();
+            const worksheet = workbook.addWorksheet("Cash Payment Invoices");
+
+            worksheet.columns = [
+                { header: "Payment ID", key: "id", width: 10 },
+                { header: "Invoice No", key: "invoice_no", width: 20 },
+                { header: "Invoice Date", key: "invoiceDate", width: 15 },
+                { header: "Payment Date", key: "paymentDate", width: 20 },
+                { header: "Payment Time", key: "paymentTime", width: 15 },
+                { header: "Patient Name", key: "patientName", width: 30 },
+                { header: "Payment Amount", key: "payment_amount", width: 15 },
+                { header: "Payment Method", key: "payment_method", width: 15 },
+                { header: "Transaction ID", key: "transactionId", width: 25 },
+                { header: "Payment Status", key: "payment_status", width: 15 },
+                { header: "Updated At", key: "updated_at", width: 20 },
+            ];
+
+            results.forEach(row => {
+                const patientName = `${row.firstName || ''} ${row.middleName || ''} ${row.lastName || ''}`.trim();
+
+                const invoiceDateObj = row.invoice_date ? new Date(row.invoice_date) : null;
+                const invoiceDate = invoiceDateObj ? invoiceDateObj.toISOString().split('T')[0] : '';
+
+                const paymentDateObj = row.payment_date ? new Date(row.payment_date) : null;
+                const paymentDate = paymentDateObj ? paymentDateObj.toISOString().split('T')[0] : '';
+                const paymentTime = paymentDateObj ? paymentDateObj.toTimeString().split(' ')[0] : '';
+
+                worksheet.addRow({
+                    id: row.id,
+                    invoice_no: row.invoice_no,
+                    invoiceDate: invoiceDate,
+                    paymentDate: paymentDate,
+                    paymentTime: paymentTime,
+                    patientName: patientName,
+                    payment_amount: row.payment_amount,
+                    payment_method: row.payment_method,
+                    transactionId: row.transactionId,
+                    payment_status: row.payment_status,
+                    updated_at: row.updated_at,
+                });
+            });
+
+            res.setHeader(
+                'Content-Type',
+                'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet'
+            );
+            res.setHeader(
+                'Content-Disposition',
+                'attachment; filename=cash_payments_report.xlsx'
+            );
+
+            await workbook.xlsx.write(res);
+            res.end();
+        });
+
+    } catch (error) {
+        console.error("Error generating cash payments report:", error);
+        res.status(500).json({ success: false, error: error.message });
+    }
+};
+
 
 export default {
     getDashboardTotals,
@@ -1541,5 +1761,8 @@ export default {
     allergiesReport,
     diagnosisPatientsReport,
     xRayReportsExport,
-    doctorsReportExport
+    doctorsReportExport,
+    patientInvoicesExport,
+    cashPaymentsReport,
+    creditCardPaymentsReport
 };
